@@ -1,0 +1,15 @@
+{
+    "appId": "com.floscha.opencapture",
+    "productName": "OpenCapture",
+    "directories": {
+        "output": "release"
+    },
+    "files": [
+        "dist/**/*"
+    ],
+    "mac": {
+        "target": "dmg",
+        "hardenedRuntime": true,
+        "gatekeeperAssess": false
+    }
+}

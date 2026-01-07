@@ -103,6 +103,88 @@ const createOptionsWindow = () => {
         optionsWindow = null;
     });
 };
+// IPC Handlers
+ipcMain.handle('append-to-inbox', async (_event, text: string) => {
+    try {
+        if (!settings.vaultPath) {
+            throw new Error('No vault selected. Please go to settings.');
+        }
+        const inboxFile = join(settings.vaultPath, 'Inbox/Inbox.md');
+        const contentToAppend = `\n${text}`;
+
+        // Ensure directory exists (optional, but safer)
+        const dir = join(settings.vaultPath, 'Inbox');
+        await fs.mkdir(dir, { recursive: true });
+
+        await fs.appendFile(inboxFile, contentToAppend, 'utf8');
+        return { success: true };
+    } catch (error) {
+        console.error('Failed to append to file:', error);
+        return { success: false, error: (error as Error).message };
+    }
+});
+
+ipcMain.handle('append-to-daily-note', async (_event, text: string) => {
+    try {
+        if (!settings.vaultPath) {
+            throw new Error('No vault selected. Please go to settings.');
+        }
+
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        const calendarDir = join(settings.vaultPath, 'Calendar');
+        const dailyFile = join(calendarDir, `${yyyy}-${mm}-${dd}.md`);
+
+        // Ensure directory exists
+        await fs.mkdir(calendarDir, { recursive: true });
+
+        const contentToAppend = `\n${text}`;
+        await fs.appendFile(dailyFile, contentToAppend, 'utf8');
+        return { success: true };
+    } catch (error) {
+        console.error('Failed to append to daily note:', error);
+        return { success: false, error: (error as Error).message };
+    }
+});
+
+ipcMain.handle('get-settings', () => settings);
+
+ipcMain.handle('update-settings', async (_event, newSettings: Partial<Settings>) => {
+    settings = { ...settings, ...newSettings };
+    await saveSettings();
+    return settings;
+});
+
+ipcMain.handle('list-vaults', async () => {
+    try {
+        const entries = await fs.readdir(OBSIDIAN_DOCUMENTS_PATH, { withFileTypes: true });
+        return entries
+            .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+            .map(entry => ({
+                name: entry.name,
+                path: join(OBSIDIAN_DOCUMENTS_PATH, entry.name)
+            }));
+    } catch (error) {
+        console.error('Failed to list vaults:', error);
+        return [];
+    }
+});
+
+ipcMain.on('hide-window', () => {
+    mainWindow?.hide();
+});
+
+ipcMain.on('resize-window', (_event, height: number) => {
+    if (mainWindow) {
+        mainWindow.setSize(750, height);
+    }
+});
+
+ipcMain.on('open-options', () => {
+    createOptionsWindow();
+});
 
 app.whenReady().then(async () => {
     await loadSettings();
@@ -144,60 +226,3 @@ app.on('will-quit', () => {
     globalShortcut.unregisterAll();
 });
 
-// IPC Handlers
-ipcMain.handle('append-to-inbox', async (_event, text: string) => {
-    try {
-        if (!settings.vaultPath) {
-            throw new Error('No vault selected. Please go to settings.');
-        }
-        const inboxFile = join(settings.vaultPath, 'Inbox/Inbox.md');
-        const contentToAppend = `\n${text}`;
-
-        // Ensure directory exists (optional, but safer)
-        const dir = join(settings.vaultPath, 'Inbox');
-        await fs.mkdir(dir, { recursive: true });
-
-        await fs.appendFile(inboxFile, contentToAppend, 'utf8');
-        return { success: true };
-    } catch (error) {
-        console.error('Failed to append to file:', error);
-        return { success: false, error: (error as Error).message };
-    }
-});
-
-ipcMain.handle('get-settings', () => settings);
-
-ipcMain.handle('update-settings', async (_event, newSettings: Partial<Settings>) => {
-    settings = { ...settings, ...newSettings };
-    await saveSettings();
-    return settings;
-});
-
-ipcMain.handle('list-vaults', async () => {
-    try {
-        const entries = await fs.readdir(OBSIDIAN_DOCUMENTS_PATH, { withFileTypes: true });
-        return entries
-            .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
-            .map(entry => ({
-                name: entry.name,
-                path: join(OBSIDIAN_DOCUMENTS_PATH, entry.name)
-            }));
-    } catch (error) {
-        console.error('Failed to list vaults:', error);
-        return [];
-    }
-});
-
-ipcMain.on('hide-window', () => {
-    mainWindow?.hide();
-});
-
-ipcMain.on('resize-window', (_event, height: number) => {
-    if (mainWindow) {
-        mainWindow.setSize(750, height);
-    }
-});
-
-ipcMain.on('open-options', () => {
-    createOptionsWindow();
-});

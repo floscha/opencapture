@@ -177,6 +177,24 @@ textarea::placeholder {
   margin-right: 4px;
 }
 
+.destination-select {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--placeholder);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: inherit;
+  appearance: none;
+  cursor: pointer;
+}
+
+.destination-select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  color: var(--text);
+}
+
 /* Options Page Styles */
 .options-page {
   width: 100%;

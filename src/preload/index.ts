@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('api', {
     appendToInbox: (text: string) => ipcRenderer.invoke('append-to-inbox', text),
+    appendToDailyNote: (text: string) => ipcRenderer.invoke('append-to-daily-note', text),
     hideWindow: () => ipcRenderer.send('hide-window'),
     resizeWindow: (height: number) => ipcRenderer.send('resize-window', height),
     getSettings: () => ipcRenderer.invoke('get-settings'),

@@ -1,5 +1,6 @@
 export interface IElectronAPI {
     appendToInbox: (text: string) => Promise<{ success: boolean; error?: string }>;
+    appendToDailyNote: (text: string) => Promise<{ success: boolean; error?: string }>;
     hideWindow: () => void;
     resizeWindow: (height: number) => void;
     getSettings: () => Promise<{ vaultPath: string }>;

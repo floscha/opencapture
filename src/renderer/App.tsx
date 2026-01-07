@@ -74,6 +74,7 @@ const CommandBar: React.FC = () => {
     const [text, setText] = useState('');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const [destination, setDestination] = useState<'Inbox' | 'Daily Note'>('Inbox');
 
     // Auto-resize textarea and window
     useEffect(() => {
@@ -105,7 +106,12 @@ const CommandBar: React.FC = () => {
     const handleSubmit = async () => {
         if (!text.trim()) return;
 
-        const result = await window.api.appendToInbox(text);
+        let result;
+        if (destination === 'Inbox') {
+            result = await window.api.appendToInbox(text);
+        } else {
+            result = await window.api.appendToDailyNote(text);
+        }
 
         if (result.success) {
             setText('');
@@ -113,6 +119,14 @@ const CommandBar: React.FC = () => {
         } else {
             console.error('Failed to append:', result.error);
         }
+    };
+
+    const handleDestinationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        setDestination(e.target.value as 'Inbox' | 'Daily Note');
+        // Return focus to the textarea after changing destination
+        requestAnimationFrame(() => {
+            textareaRef.current?.focus();
+        });
     };
 
     return (
@@ -142,7 +156,19 @@ const CommandBar: React.FC = () => {
                     </div>
                 </div>
                 <div className="footer-right">
-                    <div><span className="key">⌘ ↵</span> Capture</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <select
+                            className="destination-select"
+                            value={destination}
+                            onChange={handleDestinationChange}
+                            aria-label="Capture destination"
+                        >
+                            <option value="Inbox">Inbox</option>
+                            <option value="Daily Note">Daily Note</option>
+                        </select>
+
+                        <div><span className="key">⌘ ↵</span> Capture</div>
+                    </div>
                 </div>
             </div>
         </div>

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Tray, nativeImage, Menu } from 'electron';
+import { exec } from 'child_process';
 import { join } from 'path';
 import { promises as fs } from 'fs';
 import { homedir } from 'os';
@@ -384,6 +385,28 @@ ipcMain.handle('get-timer-state', async () => {
         return { running: false };
     }
     return { running: true, elapsed: Date.now() - timerStart!, description: timerDescription };
+});
+
+// Get active browser tab (macOS) for Google Chrome using AppleScript
+ipcMain.handle('get-active-browser-tab', async () => {
+    return new Promise((resolve) => {
+        // AppleScript to get active tab's title and URL from Google Chrome
+        const script = `tell application \"Google Chrome\"\n if it is running then\n  set w to front window\n  set t to title of active tab of w\n  set u to URL of active tab of w\n  return t & "\n" & u\n else\n  return ""\n end if\nend tell`;
+
+        exec(`osascript -e '${script.replace(/'/g, "\\'")}'`, { timeout: 2000 }, (error, stdout) => {
+            if (error) {
+                resolve({ success: false, error: error.message });
+                return;
+            }
+            const out = String(stdout || '').trim();
+            if (!out) {
+                resolve({ success: false, error: 'No active Chrome tab or Chrome is not running' });
+                return;
+            }
+            const [title, url] = out.split('\n');
+            resolve({ success: true, title: title || '', url: url || '' });
+        });
+    });
 });
 
 ipcMain.on('lock-auto-hide', () => {

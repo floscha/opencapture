@@ -104,6 +104,44 @@ const CommandBar: React.FC = () => {
                     window.api.unlockAutoHide();
                 }
             }
+            // Cmd+I: insert active Chrome tab as markdown link at cursor
+            if ((e.key === 'i' || e.key === 'I') && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                try {
+                    // Ask main for active browser tab info
+                    const res = await window.api.getActiveBrowserTab();
+                    if (res && res.success && res.title && res.url) {
+                        const markdown = `[${res.title}](${res.url})`;
+                        // Insert at current cursor position in textarea if possible
+                        const ta = textareaRef.current;
+                        if (ta) {
+                            // Remember current selection
+                            const start = ta.selectionStart ?? ta.value.length;
+                            const end = ta.selectionEnd ?? start;
+                            const before = ta.value.slice(0, start);
+                            const after = ta.value.slice(end);
+                            const newValue = before + markdown + after;
+                            setText(newValue);
+                            // Update cursor position to after inserted markdown
+                            requestAnimationFrame(() => {
+                                ta.focus();
+                                const pos = start + markdown.length;
+                                ta.setSelectionRange(pos, pos);
+                                // trigger resize effect
+                                const ev = new Event('input', { bubbles: true });
+                                ta.dispatchEvent(ev);
+                            });
+                        } else {
+                            // If no textarea, just append
+                            setText((t) => (t ? t + '\n' + markdown : markdown));
+                        }
+                    } else {
+                        console.warn('Could not get active browser tab:', res?.error);
+                    }
+                } catch (err) {
+                    console.error('Failed to fetch active browser tab', err);
+                }
+            }
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);

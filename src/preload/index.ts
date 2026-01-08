@@ -18,4 +18,6 @@ contextBridge.exposeInMainWorld('api', {
     // Temporarily prevent the main window from auto-hiding (useful around toggle calls)
     lockAutoHide: () => ipcRenderer.send('lock-auto-hide'),
     unlockAutoHide: () => ipcRenderer.send('unlock-auto-hide'),
+    // Get active browser tab (title and URL) on macOS (Google Chrome)
+    getActiveBrowserTab: () => ipcRenderer.invoke('get-active-browser-tab'),
 });

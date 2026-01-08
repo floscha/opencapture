@@ -7,6 +7,7 @@ export interface IElectronAPI {
     updateSettings: (settings: { vaultPath: string }) => Promise<{ vaultPath: string }>;
     listVaults: () => Promise<{ name: string; path: string }[]>;
     openOptions: () => void;
+    getActiveBrowserTab: () => Promise<{ success: boolean; title?: string; url?: string; error?: string }>;
     toggleTimer: (description: string, destination?: 'Inbox' | 'Daily Note') => Promise<{ running: boolean } | void>;
     startTimer: (description: string, destination?: 'Inbox' | 'Daily Note') => Promise<{ running: true } | void>;
     stopTimer: () => Promise<{ running: false } | void>;

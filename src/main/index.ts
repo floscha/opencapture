@@ -195,11 +195,20 @@ ipcMain.on('open-options', () => {
     createOptionsWindow();
 });
 
-// Timer helpers
 function ensureTray() {
     if (tray) return;
-    // Create a minimal empty image for tray icon so only title shows
-    const img = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUAAACnej3aAAAAAXRSTlMAQObYZgAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII=');
+    // Resolve path to bundled asset or source asset depending on environment
+    // In development, assets live in src/assets relative to project root
+    // In production, the renderer is built into dist and assets are copied alongside the app; try __dirname relative lookup
+    let iconPath: string;
+    if (process.env.NODE_ENV === 'development') {
+        iconPath = join(__dirname, '../../src/assets/opencapture_icon_tray.png');
+    } else {
+        iconPath = join(__dirname, '../../assets/opencapture_icon_tray.png');
+    }
+
+    let img: Electron.NativeImage;
+    img = nativeImage.createFromPath(iconPath);
     tray = new Tray(img);
     tray.setToolTip('OpenCapture Timer');
     // Build initial menu
@@ -388,6 +397,12 @@ ipcMain.on('unlock-auto-hide', () => {
 app.whenReady().then(async () => {
     await loadSettings();
     createWindow();
+    // Ensure the tray icon is created immediately when the app is ready so it shows in the menu bar
+    try {
+        ensureTray();
+    } catch (e) {
+        console.error('Failed to create tray on startup', e);
+    }
 
     // Register Global Shortcut
     const ret = globalShortcut.register('Control+Space', () => {

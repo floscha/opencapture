@@ -72,9 +72,10 @@ const Options: React.FC = () => {
 
 const CommandBar: React.FC = () => {
     const [text, setText] = useState('');
+    // in-app timer indicator removed per user request
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    const [destination, setDestination] = useState<'Inbox' | 'Daily Note'>('Inbox');
+    const [destination, setDestination] = useState<'Inbox' | 'Daily Note'>('Daily Note');
 
     // Auto-resize textarea and window
     useEffect(() => {
@@ -87,6 +88,25 @@ const CommandBar: React.FC = () => {
             const totalHeight = containerRef.current.offsetHeight;
             window.api.resizeWindow(totalHeight);
         }
+    }, [text]);
+
+    // Global keydown for Cmd+T to toggle timer even when textarea isn't focused
+    useEffect(() => {
+        const handler = async (e: KeyboardEvent) => {
+            if ((e.key === 't' || e.key === 'T') && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                try {
+                        window.api.lockAutoHide();
+                        await window.api.toggleTimer(text, destination);
+                } catch (err) {
+                    console.error('Failed to toggle timer', err);
+                } finally {
+                    window.api.unlockAutoHide();
+                }
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
     }, [text]);
 
     const handleKeyDown = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -167,7 +187,9 @@ const CommandBar: React.FC = () => {
                             <option value="Daily Note">Daily Note</option>
                         </select>
 
-                        <div><span className="key">⌘ ↵</span> Capture</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div><span className="key">⌘ ↵</span> Capture</div>
+                        </div>
                     </div>
                 </div>
             </div>

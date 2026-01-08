@@ -9,4 +9,13 @@ contextBridge.exposeInMainWorld('api', {
     updateSettings: (settings: any) => ipcRenderer.invoke('update-settings', settings),
     listVaults: () => ipcRenderer.invoke('list-vaults'),
     openOptions: () => ipcRenderer.send('open-options'),
+    // Timer controls exposed to renderer
+    toggleTimer: (description: string, destination?: 'Inbox' | 'Daily Note') => ipcRenderer.invoke('toggle-timer', description, destination),
+    startTimer: (description: string, destination?: 'Inbox' | 'Daily Note') => ipcRenderer.invoke('start-timer', description, destination),
+    stopTimer: () => ipcRenderer.invoke('stop-timer'),
+    // Timer state queries and subscription
+    // Note: getTimerState/onTimerTick removed (no in-app indicator). Timer remains visible in menu bar/tray.
+    // Temporarily prevent the main window from auto-hiding (useful around toggle calls)
+    lockAutoHide: () => ipcRenderer.send('lock-auto-hide'),
+    unlockAutoHide: () => ipcRenderer.send('unlock-auto-hide'),
 });

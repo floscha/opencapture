@@ -7,6 +7,11 @@ export interface IElectronAPI {
     updateSettings: (settings: { vaultPath: string }) => Promise<{ vaultPath: string }>;
     listVaults: () => Promise<{ name: string; path: string }[]>;
     openOptions: () => void;
+    toggleTimer: (description: string, destination?: 'Inbox' | 'Daily Note') => Promise<{ running: boolean } | void>;
+    startTimer: (description: string, destination?: 'Inbox' | 'Daily Note') => Promise<{ running: true } | void>;
+    stopTimer: () => Promise<{ running: false } | void>;
+    lockAutoHide: () => void;
+    unlockAutoHide: () => void;
 }
 
 declare global {

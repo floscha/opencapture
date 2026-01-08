@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, Tray, nativeImage, Menu } from 'electron';
 import { join } from 'path';
 import { promises as fs } from 'fs';
 import { homedir } from 'os';
@@ -18,6 +18,12 @@ const getInitialSettings = (): Settings => ({
 let settings: Settings = getInitialSettings();
 let mainWindow: BrowserWindow | null = null;
 let optionsWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let timerInterval: NodeJS.Timeout | null = null;
+let timerStart: number | null = null; // epoch ms when timer started
+let timerDescription = '';
+let timerDestination: 'Inbox' | 'Daily Note' | null = null;
+let autoHideLocked = false;
 
 async function loadSettings() {
     try {
@@ -64,7 +70,10 @@ const createWindow = () => {
 
     // Hide window when it loses focus
     mainWindow.on('blur', () => {
-        mainWindow?.hide();
+        // Don't auto-hide while timer is running or when auto-hide is temporarily locked
+        if (!timerInterval && !autoHideLocked) {
+            mainWindow?.hide();
+        }
     });
 };
 
@@ -184,6 +193,196 @@ ipcMain.on('resize-window', (_event, height: number) => {
 
 ipcMain.on('open-options', () => {
     createOptionsWindow();
+});
+
+// Timer helpers
+function ensureTray() {
+    if (tray) return;
+    // Create a minimal empty image for tray icon so only title shows
+    const img = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUAAACnej3aAAAAAXRSTlMAQObYZgAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII=');
+    tray = new Tray(img);
+    tray.setToolTip('OpenCapture Timer');
+    // Build initial menu
+    updateTrayMenu();
+    tray.on('click', () => {
+        try {
+            tray?.popUpContextMenu();
+        } catch (e) {}
+    });
+}
+
+function updateTrayMenu() {
+    if (!tray) return;
+    const template: Electron.MenuItemConstructorOptions[] = [
+        {
+            label: timerInterval ? 'Stop Timer' : 'No timer running',
+            enabled: !!timerInterval,
+            click: async () => {
+                try {
+                    await stopTimerLogic();
+                } catch (e) {
+                    console.error('Failed to stop timer from tray menu', e);
+                }
+            }
+        }
+    ];
+    const menu = Menu.buildFromTemplate(template);
+    tray.setContextMenu(menu);
+}
+
+async function stopTimerLogic() {
+    if (timerInterval) {
+        clearInterval(timerInterval as NodeJS.Timeout);
+        timerInterval = null;
+    }
+    const hadStart = timerStart !== null;
+    const recordedDestination = timerDestination;
+    const recordedStart = timerStart;
+    timerStart = null;
+    timerDescription = '';
+    timerDestination = null;
+    if (tray) {
+        try {
+            tray.setTitle('');
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    // append record if we had a start and destination
+    if (hadStart && recordedDestination && recordedStart !== null) {
+        const start = new Date(recordedStart);
+        const end = new Date();
+        const startStr = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')} ${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}:${String(start.getSeconds()).padStart(2, '0')}`;
+        const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')} ${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}:${String(end.getSeconds()).padStart(2, '0')}`;
+        const line = `- ${startStr} - ${endStr}\n`;
+        try {
+            if (recordedDestination === 'Inbox') {
+                if (!settings.vaultPath) throw new Error('No vault selected');
+                const inboxDir = join(settings.vaultPath, 'Inbox');
+                const inboxFile = join(inboxDir, 'Inbox.md');
+                await fs.mkdir(inboxDir, { recursive: true });
+                await fs.appendFile(inboxFile, line, 'utf8');
+            } else if (recordedDestination === 'Daily Note') {
+                if (!settings.vaultPath) throw new Error('No vault selected');
+                const now = new Date();
+                const yyyy = now.getFullYear();
+                const mm = String(now.getMonth() + 1).padStart(2, '0');
+                const dd = String(now.getDate()).padStart(2, '0');
+                const calendarDir = join(settings.vaultPath, 'Calendar');
+                const dailyFile = join(calendarDir, `${yyyy}-${mm}-${dd}.md`);
+                await fs.mkdir(calendarDir, { recursive: true });
+                await fs.appendFile(dailyFile, line, 'utf8');
+            }
+        } catch (err) {
+            console.error('Failed to append timer record:', err);
+        }
+    }
+
+    try {
+        const state = { running: false };
+        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('timer-tick', state));
+    } catch (e) {}
+
+    // Refresh tray menu
+    updateTrayMenu();
+}
+
+function formatElapsed(ms: number) {
+    const totalSeconds = Math.floor(ms / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) {
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function updateTrayTitle() {
+    if (!tray || timerStart === null) return;
+    const elapsed = Date.now() - timerStart;
+    const timeStr = formatElapsed(elapsed);
+    const title = `${timeStr} - ${timerDescription}`;
+    // setTitle works on macOS to show text in status bar
+    try {
+        tray.setTitle(title);
+    } catch (e) {
+        // Some platforms may not support setTitle; ignore
+    }
+    // Broadcast timer tick to renderer windows
+    try {
+        const state = { running: true, elapsed, description: timerDescription };
+        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('timer-tick', state));
+    } catch (e) {
+        // ignore
+    }
+}
+
+ipcMain.handle('start-timer', async (_event, description: string, destination?: 'Inbox' | 'Daily Note') => {
+    if (timerInterval) {
+        // already running
+        return { running: true };
+    }
+    timerDescription = description || '';
+    if (destination) timerDestination = destination;
+    timerStart = Date.now();
+    // If destination provided via args, it will be set by caller; otherwise keep existing
+    ensureTray();
+    updateTrayTitle();
+    timerInterval = setInterval(updateTrayTitle, 1000);
+    return { running: true };
+});
+
+ipcMain.handle('stop-timer', async () => {
+    await stopTimerLogic();
+    return { running: false };
+});
+
+ipcMain.handle('toggle-timer', async (_event, description: string, destination?: 'Inbox' | 'Daily Note') => {
+    if (destination) timerDestination = destination;
+    if (timerInterval) {
+        // stop
+        if (timerInterval) {
+            clearInterval(timerInterval as NodeJS.Timeout);
+            timerInterval = null;
+        }
+    timerStart = null;
+    timerDescription = '';
+    // clear destination
+    timerDestination = null;
+        if (tray) {
+            try { tray.setTitle(''); } catch (e) {}
+        }
+        try { BrowserWindow.getAllWindows().forEach(w => w.webContents.send('timer-tick', { running: false })); } catch (e) {}
+        return { running: false };
+    } else {
+        timerDescription = description || '';
+        // timerDestination may have been set from args above
+        timerStart = Date.now();
+        ensureTray();
+        updateTrayTitle();
+        timerInterval = setInterval(updateTrayTitle, 1000);
+        // Refresh tray menu
+        updateTrayMenu();
+        try { BrowserWindow.getAllWindows().forEach(w => w.webContents.send('timer-tick', { running: true, elapsed: 0, description: timerDescription })); } catch (e) {}
+        return { running: true };
+    }
+});
+
+ipcMain.handle('get-timer-state', async () => {
+    if (timerStart === null) {
+        return { running: false };
+    }
+    return { running: true, elapsed: Date.now() - timerStart!, description: timerDescription };
+});
+
+ipcMain.on('lock-auto-hide', () => {
+    autoHideLocked = true;
+});
+
+ipcMain.on('unlock-auto-hide', () => {
+    autoHideLocked = false;
 });
 
 app.whenReady().then(async () => {

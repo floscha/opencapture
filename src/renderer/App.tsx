@@ -170,6 +170,43 @@ const CommandBar: React.FC = () => {
             }
         } else if (e.key === 'Escape') {
             window.api.hideWindow();
+        } else if ((e.key === 'l' || e.key === 'L') && e.metaKey && e.shiftKey) {
+            // Cmd+Shift+L: toggle '- ' prefix for the current line
+            e.preventDefault();
+            const ta = textareaRef.current;
+            if (!ta) return;
+            const val = ta.value;
+            const selStart = ta.selectionStart ?? 0;
+            const selEnd = ta.selectionEnd ?? selStart;
+            const lineStart = val.lastIndexOf('\n', Math.max(0, selStart - 1)) + 1;
+
+            if (val.slice(lineStart, lineStart + 2) === '- ') {
+                // remove prefix
+                const newVal = val.slice(0, lineStart) + val.slice(lineStart + 2);
+                setText(newVal);
+                const delta = -2;
+                const newSelStart = Math.max(lineStart, selStart + delta);
+                const newSelEnd = Math.max(lineStart, selEnd + delta);
+                requestAnimationFrame(() => {
+                    ta.focus();
+                    ta.setSelectionRange(newSelStart, newSelEnd);
+                    const ev = new Event('input', { bubbles: true });
+                    ta.dispatchEvent(ev);
+                });
+            } else {
+                // add prefix
+                const newVal = val.slice(0, lineStart) + '- ' + val.slice(lineStart);
+                setText(newVal);
+                const delta = 2;
+                const newSelStart = selStart >= lineStart ? selStart + delta : selStart;
+                const newSelEnd = selEnd >= lineStart ? selEnd + delta : selEnd;
+                requestAnimationFrame(() => {
+                    ta.focus();
+                    ta.setSelectionRange(newSelStart, newSelEnd);
+                    const ev = new Event('input', { bubbles: true });
+                    ta.dispatchEvent(ev);
+                });
+            }
         } else if (e.key === ',' && e.metaKey) {
             e.preventDefault();
             window.api.openOptions();

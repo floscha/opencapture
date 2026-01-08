@@ -91,6 +91,7 @@ const CommandBar: React.FC = () => {
     }, [text]);
 
     // Global keydown for Cmd+T to toggle timer even when textarea isn't focused
+    // Also handle Cmd+I (insert tab) and Cmd+O (cycle destination)
     useEffect(() => {
         const handler = async (e: KeyboardEvent) => {
             if ((e.key === 't' || e.key === 'T') && (e.metaKey || e.ctrlKey)) {
@@ -103,6 +104,14 @@ const CommandBar: React.FC = () => {
                 } finally {
                     window.api.unlockAutoHide();
                 }
+            }
+            // Cmd+O: cycle destination between Inbox and Daily Note
+            if ((e.key === 'o' || e.key === 'O') && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                e.stopPropagation();
+                setDestination((prev) => (prev === 'Inbox' ? 'Daily Note' : 'Inbox'));
+                // Return focus to the textarea
+                requestAnimationFrame(() => textareaRef.current?.focus());
             }
             // Cmd+I: insert active Chrome tab as markdown link at cursor
             if ((e.key === 'i' || e.key === 'I') && (e.metaKey || e.ctrlKey)) {

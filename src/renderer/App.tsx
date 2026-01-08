@@ -110,8 +110,14 @@ const CommandBar: React.FC = () => {
     }, [text]);
 
     const handleKeyDown = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        // Enter should capture. Shift+Enter should insert a newline.
         if (e.key === 'Enter') {
-            if (e.metaKey || e.ctrlKey) {
+            if (e.shiftKey) {
+                // allow default behavior (inserting a newline)
+                return;
+            }
+            // For Enter without Shift, treat as submit. Also allow Cmd/Ctrl+Enter for accessibility.
+            if (e.metaKey || e.ctrlKey || !e.metaKey && !e.ctrlKey) {
                 e.preventDefault();
                 await handleSubmit();
             }
@@ -188,7 +194,7 @@ const CommandBar: React.FC = () => {
                         </select>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div><span className="key">⌘ ↵</span> Capture</div>
+                            <div><span className="key">↵</span> Capture</div>
                         </div>
                     </div>
                 </div>

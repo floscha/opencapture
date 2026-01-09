@@ -171,7 +171,8 @@ const CommandBar: React.FC = () => {
         } else if (e.key === 'Escape') {
             window.api.hideWindow();
         } else if ((e.key === 'l' || e.key === 'L') && e.metaKey && e.shiftKey) {
-            // Cmd+Shift+L: toggle '- ' prefix for the current line
+            // Cmd+Shift+L: prefer converting a task prefix '- [ ] ' to a simple '- '
+            // Otherwise behave like a toggle for '- '
             e.preventDefault();
             const ta = textareaRef.current;
             if (!ta) return;
@@ -180,8 +181,22 @@ const CommandBar: React.FC = () => {
             const selEnd = ta.selectionEnd ?? selStart;
             const lineStart = val.lastIndexOf('\n', Math.max(0, selStart - 1)) + 1;
 
-            if (val.slice(lineStart, lineStart + 2) === '- ') {
-                // remove prefix
+            const taskPrefix = val.slice(lineStart, lineStart + 6);
+            if (/^-\s\[[ xX]\]\s/.test(taskPrefix)) {
+                // replace '- [ ] ' (6 chars) with '- ' (2 chars)
+                const newVal = val.slice(0, lineStart) + '- ' + val.slice(lineStart + 6);
+                setText(newVal);
+                const delta = -4; // net -4 chars
+                const newSelStart = Math.max(lineStart, selStart + delta);
+                const newSelEnd = Math.max(lineStart, selEnd + delta);
+                requestAnimationFrame(() => {
+                    ta.focus();
+                    ta.setSelectionRange(newSelStart, newSelEnd);
+                    const ev = new Event('input', { bubbles: true });
+                    ta.dispatchEvent(ev);
+                });
+            } else if (val.slice(lineStart, lineStart + 2) === '- ') {
+                // existing simple prefix -> remove it (toggle off)
                 const newVal = val.slice(0, lineStart) + val.slice(lineStart + 2);
                 setText(newVal);
                 const delta = -2;
@@ -194,10 +209,61 @@ const CommandBar: React.FC = () => {
                     ta.dispatchEvent(ev);
                 });
             } else {
-                // add prefix
+                // add simple '- ' prefix
                 const newVal = val.slice(0, lineStart) + '- ' + val.slice(lineStart);
                 setText(newVal);
                 const delta = 2;
+                const newSelStart = selStart >= lineStart ? selStart + delta : selStart;
+                const newSelEnd = selEnd >= lineStart ? selEnd + delta : selEnd;
+                requestAnimationFrame(() => {
+                    ta.focus();
+                    ta.setSelectionRange(newSelStart, newSelEnd);
+                    const ev = new Event('input', { bubbles: true });
+                    ta.dispatchEvent(ev);
+                });
+            }
+        } else if ((e.key === 'l' || e.key === 'L') && e.metaKey && !e.shiftKey) {
+            // Cmd+L: if the line has a simple '- ' prefix, replace it with '- [ ] '
+            // If it already has a task prefix, remove it (toggle off). Otherwise add '- [ ] '.
+            e.preventDefault();
+            const ta = textareaRef.current;
+            if (!ta) return;
+            const val = ta.value;
+            const selStart = ta.selectionStart ?? 0;
+            const selEnd = ta.selectionEnd ?? selStart;
+            const lineStart = val.lastIndexOf('\n', Math.max(0, selStart - 1)) + 1;
+            const taskPrefix = val.slice(lineStart, lineStart + 6);
+            if (/^-\s\[[ xX]\]\s/.test(taskPrefix)) {
+                // remove task prefix
+                const newVal = val.slice(0, lineStart) + val.slice(lineStart + 6);
+                setText(newVal);
+                const delta = -6;
+                const newSelStart = Math.max(lineStart, selStart + delta);
+                const newSelEnd = Math.max(lineStart, selEnd + delta);
+                requestAnimationFrame(() => {
+                    ta.focus();
+                    ta.setSelectionRange(newSelStart, newSelEnd);
+                    const ev = new Event('input', { bubbles: true });
+                    ta.dispatchEvent(ev);
+                });
+            } else if (val.slice(lineStart, lineStart + 2) === '- ') {
+                // replace simple '- ' with '- [ ] '
+                const newVal = val.slice(0, lineStart) + '- [ ] ' + val.slice(lineStart + 2);
+                setText(newVal);
+                const delta = 4; // replacing 2 chars with 6 chars
+                const newSelStart = selStart >= lineStart ? selStart + delta : selStart;
+                const newSelEnd = selEnd >= lineStart ? selEnd + delta : selEnd;
+                requestAnimationFrame(() => {
+                    ta.focus();
+                    ta.setSelectionRange(newSelStart, newSelEnd);
+                    const ev = new Event('input', { bubbles: true });
+                    ta.dispatchEvent(ev);
+                });
+            } else {
+                // add unchecked task prefix
+                const newVal = val.slice(0, lineStart) + '- [ ] ' + val.slice(lineStart);
+                setText(newVal);
+                const delta = 6;
                 const newSelStart = selStart >= lineStart ? selStart + delta : selStart;
                 const newSelEnd = selEnd >= lineStart ? selEnd + delta : selEnd;
                 requestAnimationFrame(() => {

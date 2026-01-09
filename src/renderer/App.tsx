@@ -132,6 +132,29 @@ const Options: React.FC = () => {
         };
     }, [theme]);
 
+    // Keyboard shortcuts: Enter to save (unless Shift+Enter), Escape to cancel
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                window.close();
+            }
+            if (e.key === 'Enter' && !e.shiftKey) {
+                // Don't trigger when focus is in a textarea (to allow newline)
+                const active = document.activeElement;
+                if (active && active.tagName === 'TEXTAREA') return;
+                e.preventDefault();
+                // call the same save function used by the Save button
+                (async () => {
+                    await window.api.updateSettings({ vaultPath: vaultPath, theme });
+                    window.close();
+                })();
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [vaultPath, theme]);
+
     const handleSave = async () => {
         await window.api.updateSettings({ vaultPath: vaultPath, theme });
         window.close();

@@ -7,6 +7,11 @@ contextBridge.exposeInMainWorld('api', {
     resizeWindow: (height: number) => ipcRenderer.send('resize-window', height),
     getSettings: () => ipcRenderer.invoke('get-settings'),
     updateSettings: (settings: any) => ipcRenderer.invoke('update-settings', settings),
+    onSettingsUpdated: (callback: (settings: any) => void) => {
+        ipcRenderer.on('settings-updated', (_event, settings) => callback(settings));
+        // return an unsubscribe function
+        return () => ipcRenderer.removeAllListeners('settings-updated');
+    },
     listVaults: () => ipcRenderer.invoke('list-vaults'),
     openOptions: () => ipcRenderer.send('open-options'),
     // Timer controls exposed to renderer

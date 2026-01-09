@@ -3,6 +3,70 @@ import React, { useState, useRef, useEffect } from 'react';
 const App: React.FC = () => {
     const [route, setRoute] = useState(window.location.hash);
 
+    // Apply persisted theme on startup
+    useEffect(() => {
+        let mql: MediaQueryList | null = null;
+        let mqlHandler: ((e: MediaQueryListEvent) => void) | null = null;
+
+        const applyTheme = (theme: 'dark' | 'light' | 'system') => {
+            if (theme === 'system') {
+                // match the OS preference
+                const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+                document.documentElement.dataset.theme = prefersLight ? 'light' : 'dark';
+            } else {
+                document.documentElement.dataset.theme = theme;
+            }
+        };
+
+        const setup = async () => {
+            try {
+                const settings = await window.api.getSettings();
+                const theme = settings.theme ?? 'system';
+                applyTheme(theme);
+
+                // If system, listen for changes
+                if (theme === 'system' && window.matchMedia) {
+                    mql = window.matchMedia('(prefers-color-scheme: light)');
+                    mqlHandler = (e: MediaQueryListEvent) => {
+                        document.documentElement.dataset.theme = e.matches ? 'light' : 'dark';
+                    };
+                    // modern API
+                    if (mql.addEventListener) mql.addEventListener('change', mqlHandler as EventListener);
+                    // fallback older API
+                    else if ((mql as any).addListener) (mql as any).addListener(mqlHandler);
+                }
+            } catch (err) {
+                console.warn('Could not load settings for theme', err);
+            }
+        };
+
+        setup();
+
+        return () => {
+            if (mql && mqlHandler) {
+                if (mql.removeEventListener) mql.removeEventListener('change', mqlHandler as EventListener);
+                else if ((mql as any).removeListener) (mql as any).removeListener(mqlHandler);
+            }
+        };
+    }, []);
+
+    // Listen for settings updates broadcasted by main (so theme changes propagate without restart)
+    useEffect(() => {
+        const unsub = window.api.onSettingsUpdated((s) => {
+            const theme = s.theme ?? 'system';
+            if (theme === 'system') {
+                const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+                document.documentElement.dataset.theme = prefersLight ? 'light' : 'dark';
+            } else {
+                document.documentElement.dataset.theme = theme;
+            }
+        });
+
+        return () => {
+            try { unsub(); } catch (e) {}
+        };
+    }, []);
+
     useEffect(() => {
         const handleHashChange = () => setRoute(window.location.hash);
         window.addEventListener('hashchange', handleHashChange);
@@ -18,6 +82,7 @@ const App: React.FC = () => {
 
 const Options: React.FC = () => {
     const [vaultPath, setVaultPath] = useState('');
+    const [theme, setTheme] = useState<'dark' | 'light' | 'system'>('system');
     const [vaults, setVaults] = useState<{ name: string; path: string }[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -28,14 +93,47 @@ const Options: React.FC = () => {
                 window.api.listVaults()
             ]);
             setVaultPath(settings.vaultPath);
+            setTheme(settings.theme ?? 'system');
             setVaults(availableVaults);
             setIsLoading(false);
         };
         fetchData();
     }, []);
 
+    // Apply selected theme immediately so users see changes before saving
+    useEffect(() => {
+        let mql: MediaQueryList | null = null;
+        let handler: ((e: MediaQueryListEvent) => void) | null = null;
+
+        const apply = (t: 'dark' | 'light' | 'system') => {
+            if (t === 'system') {
+                const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+                document.documentElement.dataset.theme = prefersLight ? 'light' : 'dark';
+                if (window.matchMedia) {
+                    mql = window.matchMedia('(prefers-color-scheme: light)');
+                    handler = (e: MediaQueryListEvent) => {
+                        document.documentElement.dataset.theme = e.matches ? 'light' : 'dark';
+                    };
+                    if (mql.addEventListener) mql.addEventListener('change', handler as EventListener);
+                    else if ((mql as any).addListener) (mql as any).addListener(handler);
+                }
+            } else {
+                document.documentElement.dataset.theme = t;
+            }
+        };
+
+        apply(theme);
+
+        return () => {
+            if (mql && handler) {
+                if (mql.removeEventListener) mql.removeEventListener('change', handler as EventListener);
+                else if ((mql as any).removeListener) (mql as any).removeListener(handler);
+            }
+        };
+    }, [theme]);
+
     const handleSave = async () => {
-        await window.api.updateSettings({ vaultPath: vaultPath });
+        await window.api.updateSettings({ vaultPath: vaultPath, theme });
         window.close();
     };
 
@@ -59,6 +157,19 @@ const Options: React.FC = () => {
                             {vault.name}
                         </option>
                     ))}
+                </select>
+            </div>
+
+            <div className="settings-group">
+                <label htmlFor="theme-select">Theme</label>
+                <select
+                    id="theme-select"
+                    value={theme}
+                    onChange={(e) => setTheme(e.target.value as 'dark' | 'light' | 'system')}
+                >
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                    <option value="system">Match system</option>
                 </select>
             </div>
 

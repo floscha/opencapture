@@ -10,10 +10,12 @@ const SETTINGS_FILE_PATH = join(app.getPath('userData'), 'settings.json');
 
 interface Settings {
     vaultPath: string;
+    theme?: 'dark' | 'light' | 'system';
 }
 
 const getInitialSettings = (): Settings => ({
     vaultPath: ''
+    , theme: 'system'
 });
 
 let settings: Settings = getInitialSettings();
@@ -164,6 +166,12 @@ ipcMain.handle('get-settings', () => settings);
 ipcMain.handle('update-settings', async (_event, newSettings: Partial<Settings>) => {
     settings = { ...settings, ...newSettings };
     await saveSettings();
+    // Notify all renderer windows about the updated settings so they can react without restart
+    try {
+        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('settings-updated', settings));
+    } catch (e) {
+        console.warn('Failed to broadcast settings-updated', e);
+    }
     return settings;
 });
 

@@ -3,9 +3,31 @@
   --text: #ffffff;
   --placeholder: #6b7280;
   --border: #374151;
+  --card-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  --card-outline: 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --hover-bg: rgba(255, 255, 255, 0.08);
+  --menu-bg: #25262b;
+  --select-bg: rgba(255, 255, 255, 0.03);
+  --input-bg: rgba(255, 255, 255, 0.05);
+  --footer-bg: rgba(255, 255, 255, 0.03);
   --radius: 12px;
   --spacing: 16px;
   --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Light theme overrides when [data-theme="light"] is set on the document root */
+[data-theme="light"] {
+  --background: #ffffff;
+  --text: #111827; /* dark text */
+  --placeholder: #9ca3af;
+  --border: #e5e7eb;
+  --card-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+  --card-outline: 0 0 0 1px rgba(0,0,0,0.04);
+  --hover-bg: rgba(0,0,0,0.04);
+  --menu-bg: #ffffff;
+  --select-bg: rgba(0,0,0,0.03);
+  --input-bg: rgba(0,0,0,0.03);
+  --footer-bg: #F6F6F6;
 }
 
 * {
@@ -38,7 +60,7 @@ body {
   max-width: 750px;
   background: var(--background);
   border-radius: var(--radius);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  box-shadow: var(--card-shadow), var(--card-outline);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -46,6 +68,9 @@ body {
 
 textarea {
   width: 100%;
+  /* Text field background: dark uses transparent over the card, light should be near #FFF
+     Keep using transparent so the command-bar background shows through, but for light
+     theme ensure the command-bar background is light. */
   background: transparent;
   border: none;
   color: var(--text);
@@ -69,10 +94,18 @@ textarea::placeholder {
   justify-content: space-between;
   align-items: center;
   padding: 8px var(--spacing);
+  /* Footer background should be subtle. For light theme use #F6F6F6 as requested. */
   background: rgba(255, 255, 255, 0.03);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   gap: 12px;
   font-size: 11px;
+  color: var(--placeholder);
+}
+
+/* Specific override for light theme footer */
+[data-theme="light"] .footer {
+  background: #F6F6F6;
+  border-top: 1px solid #eaeaea;
   color: var(--placeholder);
 }
 
@@ -105,7 +138,7 @@ textarea::placeholder {
 .options-trigger:hover,
 .options-trigger.active {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hover-bg);
 }
 
 .current-vault {
@@ -119,7 +152,7 @@ textarea::placeholder {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  background: #25262b;
+  background: var(--menu-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
@@ -178,7 +211,7 @@ textarea::placeholder {
 }
 
 .destination-select {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--select-bg);
   color: var(--placeholder);
   border: 1px solid rgba(255, 255, 255, 0.04);
   padding: 6px 8px;
@@ -227,7 +260,7 @@ textarea::placeholder {
 
 .settings-group input,
 .settings-group select {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px 12px;

@@ -463,6 +463,106 @@ const CommandBar: React.FC = () => {
     }, [text, showInsertMenu, selectedInsertIndex, showOutputMenu, selectedOutputIndex, destination]);
 
     const handleKeyDown = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        // Handle Tab / Shift+Tab for indentation and inserting a literal tab
+        if (e.key === 'Tab') {
+            const ta = textareaRef.current;
+            if (!ta) return;
+            e.preventDefault();
+
+            const val = ta.value;
+            const selStart = ta.selectionStart ?? 0;
+            const selEnd = ta.selectionEnd ?? selStart;
+
+            // compute the start and end of the affected block (full lines)
+            const lineStart = val.lastIndexOf('\n', Math.max(0, selStart - 1)) + 1;
+            // find index after the last line included in selection
+            let endLineIndex = val.indexOf('\n', selEnd);
+            if (endLineIndex === -1) endLineIndex = val.length; // until EOF
+            else endLineIndex = val.indexOf('\n', selEnd) + 1; // include newline
+
+            const block = val.slice(lineStart, selEnd);
+            const lines = block.split('\n');
+
+            // Helper to detect list-marker lines like "   - "
+            const isListLine = (s: string) => /^\s*-\s/.test(s);
+
+            if (e.shiftKey) {
+                // Dedent: for each selected line remove one leading '\t' or up to 4 spaces
+                const newLines = lines.map((ln) => {
+                    if (ln.startsWith('\t')) return ln.slice(1);
+                    if (/^ {1,4}/.test(ln)) return ln.replace(/^ {1,4}/, '');
+                    // If no leading indent but it's a list line, try to remove one leading tab before optional whitespace
+                    if (isListLine(ln)) return ln.replace(/^\t/, '');
+                    return ln;
+                });
+
+                const newVal = val.slice(0, lineStart) + newLines.join('\n') + val.slice(selEnd);
+                setText(newVal);
+
+                // compute new selection positions
+                // count removed characters per line to adjust selection
+                let removed = 0;
+                for (let i = 0; i < lines.length; i++) {
+                    const oldLn = lines[i];
+                    const newLn = newLines[i];
+                    removed += oldLn.length - newLn.length;
+                }
+
+                requestAnimationFrame(() => {
+                    ta.focus();
+                    // set selection to cover the transformed block
+                    ta.setSelectionRange(lineStart, lineStart + newLines.join('\n').length);
+                    const ev = new Event('input', { bubbles: true });
+                    ta.dispatchEvent(ev);
+                });
+            } else {
+                // Indent: if multiple lines selected we indent each line; otherwise insert a literal tab at cursor
+                if (selStart !== selEnd && lines.length > 1) {
+                    const newLines = lines.map((ln) => '\t' + ln);
+                    const newVal = val.slice(0, lineStart) + newLines.join('\n') + val.slice(selEnd);
+                    setText(newVal);
+                    requestAnimationFrame(() => {
+                        ta.focus();
+                        // place selection around the indented block
+                        ta.setSelectionRange(lineStart, lineStart + newLines.join('\n').length);
+                        const ev = new Event('input', { bubbles: true });
+                        ta.dispatchEvent(ev);
+                    });
+                } else {
+                    // single caret or single-line selection: if current line starts with list marker, indent the whole line
+                    const lineEnd = val.indexOf('\n', selStart) === -1 ? val.length : val.indexOf('\n', selStart);
+                    const currentLine = val.slice(lineStart, lineEnd);
+                    if (isListLine(currentLine)) {
+                        const newLine = '\t' + currentLine;
+                        const newVal = val.slice(0, lineStart) + newLine + val.slice(lineEnd);
+                        setText(newVal);
+                        const delta = 1; // inserted one char
+                        requestAnimationFrame(() => {
+                            ta.focus();
+                            const pos = (selStart >= lineStart ? selStart + delta : selStart);
+                            ta.setSelectionRange(pos, pos);
+                            const ev = new Event('input', { bubbles: true });
+                            ta.dispatchEvent(ev);
+                        });
+                    } else {
+                        // plain insert tab at caret (common behavior)
+                        const before = val.slice(0, selStart);
+                        const after = val.slice(selEnd);
+                        const newVal = before + '\t' + after;
+                        setText(newVal);
+                        requestAnimationFrame(() => {
+                            ta.focus();
+                            const pos = selStart + 1;
+                            ta.setSelectionRange(pos, pos);
+                            const ev = new Event('input', { bubbles: true });
+                            ta.dispatchEvent(ev);
+                        });
+                    }
+                }
+            }
+
+            return;
+        }
         // Escape: close insert menu or output menu if open, otherwise hide window
         if (e.key === 'Escape') {
             if (showInsertMenu) {

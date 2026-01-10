@@ -210,6 +210,9 @@ const CommandBar: React.FC = () => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [destination, setDestination] = useState<'Inbox' | 'Daily Note'>('Daily Note');
+    const [showInsertMenu, setShowInsertMenu] = useState(false);
+    const [selectedInsertIndex, setSelectedInsertIndex] = useState(0);
+    const cmdPressedRef = useRef(false);
 
     // Auto-resize textarea and window
     useEffect(() => {
@@ -219,14 +222,38 @@ const CommandBar: React.FC = () => {
             const newHeight = Math.max(60, scrollHeight);
             textareaRef.current.style.height = `${newHeight}px`;
 
-            const totalHeight = containerRef.current.offsetHeight;
-            window.api.resizeWindow(totalHeight);
+            // Use requestAnimationFrame to ensure DOM has updated before measuring
+            requestAnimationFrame(() => {
+                if (containerRef.current) {
+                    const totalHeight = containerRef.current.offsetHeight;
+                    window.api.resizeWindow(totalHeight);
+                }
+            });
         }
-    }, [text]);
+    }, [text, showInsertMenu]);
+
+    // Close insert menu when clicking outside
+    useEffect(() => {
+        if (!showInsertMenu) return;
+        
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest('.insert-menu')) {
+                setShowInsertMenu(false);
+                setSelectedInsertIndex(0);
+                cmdPressedRef.current = false;
+            }
+        };
+        
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showInsertMenu]);
 
     // Global keydown for Cmd+T to toggle timer even when textarea isn't focused
     // Also handle Cmd+I (insert tab) and Cmd+O (cycle destination)
     useEffect(() => {
+        const insertMenuItems = ['clipboard', 'browserTab'] as const;
+        
         const handler = async (e: KeyboardEvent) => {
             if ((e.key === 't' || e.key === 'T') && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
@@ -247,50 +274,57 @@ const CommandBar: React.FC = () => {
                 // Return focus to the textarea
                 requestAnimationFrame(() => textareaRef.current?.focus());
             }
-            // Cmd+I: insert active Chrome tab as markdown link at cursor
+            // Cmd+I: show insert menu and cycle through items while cmd is held
             if ((e.key === 'i' || e.key === 'I') && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
-                try {
-                    // Ask main for active browser tab info
-                    const res = await window.api.getActiveBrowserTab();
-                    if (res && res.success && res.title && res.url) {
-                        const markdown = `[${res.title}](${res.url})`;
-                        // Insert at current cursor position in textarea if possible
-                        const ta = textareaRef.current;
-                        if (ta) {
-                            // Remember current selection
-                            const start = ta.selectionStart ?? ta.value.length;
-                            const end = ta.selectionEnd ?? start;
-                            const before = ta.value.slice(0, start);
-                            const after = ta.value.slice(end);
-                            const newValue = before + markdown + after;
-                            setText(newValue);
-                            // Update cursor position to after inserted markdown
-                            requestAnimationFrame(() => {
-                                ta.focus();
-                                const pos = start + markdown.length;
-                                ta.setSelectionRange(pos, pos);
-                                // trigger resize effect
-                                const ev = new Event('input', { bubbles: true });
-                                ta.dispatchEvent(ev);
-                            });
-                        } else {
-                            // If no textarea, just append
-                            setText((t) => (t ? t + '\n' + markdown : markdown));
-                        }
-                    } else {
-                        console.warn('Could not get active browser tab:', res?.error);
-                    }
-                } catch (err) {
-                    console.error('Failed to fetch active browser tab', err);
+                
+                if (!showInsertMenu) {
+                    // First press: show menu with first item selected
+                    setShowInsertMenu(true);
+                    setSelectedInsertIndex(0);
+                    cmdPressedRef.current = true;
+                } else if (cmdPressedRef.current) {
+                    // Subsequent presses while cmd held: cycle to next item
+                    setSelectedInsertIndex((prev) => (prev + 1) % insertMenuItems.length);
                 }
             }
         };
+        
+        const keyupHandler = async (e: KeyboardEvent) => {
+            // When cmd key is released, trigger the selected item
+            if ((e.key === 'Meta' || e.key === 'Control') && cmdPressedRef.current && showInsertMenu) {
+                cmdPressedRef.current = false;
+                
+                // Trigger the selected item
+                const selectedItem = insertMenuItems[selectedInsertIndex];
+                if (selectedItem === 'clipboard') {
+                    await handleInsertClipboard();
+                } else if (selectedItem === 'browserTab') {
+                    await handleInsertBrowserTab();
+                }
+            }
+        };
+        
         window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, [text]);
+        window.addEventListener('keyup', keyupHandler);
+        return () => {
+            window.removeEventListener('keydown', handler);
+            window.removeEventListener('keyup', keyupHandler);
+        };
+    }, [text, showInsertMenu, selectedInsertIndex]);
 
     const handleKeyDown = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        // Escape: close insert menu if open, otherwise hide window
+        if (e.key === 'Escape') {
+            if (showInsertMenu) {
+                e.preventDefault();
+                setShowInsertMenu(false);
+                setSelectedInsertIndex(0);
+                cmdPressedRef.current = false;
+                return;
+            }
+            window.api.hideWindow();
+        }
         // Enter should capture. Shift+Enter should insert a newline.
         if (e.key === 'Enter') {
             if (e.shiftKey) {
@@ -302,9 +336,8 @@ const CommandBar: React.FC = () => {
                 e.preventDefault();
                 await handleSubmit();
             }
-        } else if (e.key === 'Escape') {
-            window.api.hideWindow();
-        } else if ((e.key === 'l' || e.key === 'L') && e.metaKey && e.shiftKey) {
+        }
+        if ((e.key === 'l' || e.key === 'L') && e.metaKey && e.shiftKey) {
             // Cmd+Shift+L: prefer converting a task prefix '- [ ] ' to a simple '- '
             // Otherwise behave like a toggle for '- '
             e.preventDefault();
@@ -439,6 +472,83 @@ const CommandBar: React.FC = () => {
         });
     };
 
+    const handleInsertBrowserTab = async () => {
+        try {
+            // Ask main for active browser tab info
+            const res = await window.api.getActiveBrowserTab();
+            if (res && res.success && res.title && res.url) {
+                const markdown = `[${res.title}](${res.url})`;
+                // Insert at current cursor position in textarea if possible
+                const ta = textareaRef.current;
+                if (ta) {
+                    // Remember current selection
+                    const start = ta.selectionStart ?? ta.value.length;
+                    const end = ta.selectionEnd ?? start;
+                    const before = ta.value.slice(0, start);
+                    const after = ta.value.slice(end);
+                    const newValue = before + markdown + after;
+                    setText(newValue);
+                    // Update cursor position to after inserted markdown
+                    requestAnimationFrame(() => {
+                        ta.focus();
+                        const pos = start + markdown.length;
+                        ta.setSelectionRange(pos, pos);
+                        // trigger resize effect
+                        const ev = new Event('input', { bubbles: true });
+                        ta.dispatchEvent(ev);
+                    });
+                } else {
+                    // If no textarea, just append
+                    setText((t) => (t ? t + '\n' + markdown : markdown));
+                }
+            } else {
+                console.warn('Could not get active browser tab:', res?.error);
+            }
+        } catch (err) {
+            console.error('Failed to fetch active browser tab', err);
+        } finally {
+            setShowInsertMenu(false);
+            setSelectedInsertIndex(0);
+            cmdPressedRef.current = false;
+        }
+    };
+
+    const handleInsertClipboard = async () => {
+        try {
+            const clipboardText = await navigator.clipboard.readText();
+            if (clipboardText) {
+                const ta = textareaRef.current;
+                if (ta) {
+                    // Insert at current cursor position
+                    const start = ta.selectionStart ?? ta.value.length;
+                    const end = ta.selectionEnd ?? start;
+                    const before = ta.value.slice(0, start);
+                    const after = ta.value.slice(end);
+                    const newValue = before + clipboardText + after;
+                    setText(newValue);
+                    // Update cursor position to after inserted text
+                    requestAnimationFrame(() => {
+                        ta.focus();
+                        const pos = start + clipboardText.length;
+                        ta.setSelectionRange(pos, pos);
+                        // trigger resize effect
+                        const ev = new Event('input', { bubbles: true });
+                        ta.dispatchEvent(ev);
+                    });
+                } else {
+                    // If no textarea, just append
+                    setText((t) => (t ? t + '\n' + clipboardText : clipboardText));
+                }
+            }
+        } catch (err) {
+            console.error('Failed to read clipboard', err);
+        } finally {
+            setShowInsertMenu(false);
+            setSelectedInsertIndex(0);
+            cmdPressedRef.current = false;
+        }
+    };
+
     return (
         <div className="command-bar" ref={containerRef}>
             <textarea
@@ -450,6 +560,23 @@ const CommandBar: React.FC = () => {
                 autoFocus
                 rows={1}
             />
+            {showInsertMenu && (
+                <div className="insert-menu">
+                    <div className="menu-header">Select an input</div>
+                    <div 
+                        className={`menu-item ${selectedInsertIndex === 0 ? 'selected' : ''}`}
+                        onClick={handleInsertClipboard}
+                    >
+                        Clipboard
+                    </div>
+                    <div 
+                        className={`menu-item ${selectedInsertIndex === 1 ? 'selected' : ''}`}
+                        onClick={handleInsertBrowserTab}
+                    >
+                        Current tab
+                    </div>
+                </div>
+            )}
             <div className="footer">
                 <div className="footer-left">
                     <div className="options-container">

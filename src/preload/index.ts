@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('api', {
     appendToDailyNote: (text: string) => ipcRenderer.invoke('append-to-daily-note', text),
     hideWindow: () => ipcRenderer.send('hide-window'),
     resizeWindow: (height: number) => ipcRenderer.send('resize-window', height),
+    resizeOptionsWindow: (height: number) => ipcRenderer.send('resize-options-window', height),
     getSettings: () => ipcRenderer.invoke('get-settings'),
     updateSettings: (settings: any) => ipcRenderer.invoke('update-settings', settings),
     onSettingsUpdated: (callback: (settings: any) => void) => {

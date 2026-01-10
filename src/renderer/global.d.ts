@@ -3,6 +3,7 @@ export interface IElectronAPI {
     appendToDailyNote: (text: string) => Promise<{ success: boolean; error?: string }>;
     hideWindow: () => void;
     resizeWindow: (height: number) => void;
+    resizeOptionsWindow: (height: number) => void;
     // theme: 'dark' | 'light' | 'system' - 'system' means match OS preference
     getSettings: () => Promise<{ vaultPath: string; theme?: 'dark' | 'light' | 'system' }>;
     updateSettings: (settings: { vaultPath?: string; theme?: 'dark' | 'light' | 'system' }) => Promise<{ vaultPath: string; theme?: 'dark' | 'light' | 'system' }>;

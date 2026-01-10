@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Tray, nativeImage, Menu } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, Tray, nativeImage, Menu, screen } from 'electron';
 import { exec } from 'child_process';
 import { join } from 'path';
 import { promises as fs } from 'fs';
@@ -87,11 +87,17 @@ const createOptionsWindow = () => {
     }
 
     optionsWindow = new BrowserWindow({
-        width: 400,
-        height: 300,
+        width: 640,
+        height: 700,
+        minWidth: 480,
+        minHeight: 320,
+        resizable: true,
         show: false, // Start hidden to prevent flash
+        frame: false, // Frameless like the command bar
+        transparent: true, // Transparent so the renderer draws the UI
+        skipTaskbar: true,
         title: 'OpenCapture Options',
-        backgroundColor: '#1a1b1e', // Match app background
+        backgroundColor: '#1a1b1e', // Match app background (used as a fallback)
         webPreferences: {
             preload: join(__dirname, '../../dist/preload/index.js'),
             sandbox: false,
@@ -108,7 +114,8 @@ const createOptionsWindow = () => {
     }
 
     optionsWindow.once('ready-to-show', () => {
-        optionsWindow?.show();
+        // Wait for renderer to report content height before showing to avoid transparent gaps
+        // Renderer will call 'resize-options-window' which will show the window after sizing.
     });
 
     optionsWindow.on('closed', () => {
@@ -202,6 +209,24 @@ ipcMain.on('resize-window', (_event, height: number) => {
 
 ipcMain.on('open-options', () => {
     createOptionsWindow();
+});
+
+ipcMain.on('resize-options-window', (_event, height: number) => {
+    if (optionsWindow) {
+        // Keep current width, only adjust height but clamp to the primary display work area
+        const [width] = optionsWindow.getSize();
+        try {
+            const display = screen.getDisplayMatching(optionsWindow.getBounds());
+            const maxHeight = display.workAreaSize.height - 40; // leave some margin
+            const newHeight = Math.max(200, Math.min(Math.round(height), maxHeight));
+            optionsWindow.setSize(width, newHeight);
+            if (!optionsWindow.isVisible()) {
+                optionsWindow.show();
+            }
+        } catch (e) {
+            optionsWindow.setSize(width, Math.max(200, Math.round(height)));
+        }
+    }
 });
 
 function ensureTray() {

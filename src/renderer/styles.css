@@ -290,19 +290,61 @@ textarea::placeholder {
 /* Options Page Styles */
 .options-page {
   width: 100%;
-  height: 100%;
+  /* Let the options page size to its content while capping at the viewport height */
+  height: auto;
+  max-height: 100vh;
   background: var(--background);
   color: var(--text);
-  padding: 24px;
+  padding: 24px 24px 80px 24px; /* reserve space at bottom for sticky footer area */
   display: flex;
   flex-direction: column;
   gap: 20px;
+  overflow: auto; /* allow scrolling when the window is capped to the screen */
+  -webkit-overflow-scrolling: touch;
 }
 
 .options-page h1 {
   font-size: 18px;
   font-weight: 600;
   margin-bottom: 8px;
+}
+
+.options-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  /* allow dragging the window by the header area */
+  -webkit-app-region: drag;
+}
+
+.options-close {
+  -webkit-app-region: no-drag; /* make the button clickable */
+  background: transparent;
+  border: none;
+  color: var(--placeholder);
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.options-close:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+/* Background layer for options window that visually fills the entire window
+   but doesn't affect layout or measured content height. Useful when the
+   BrowserWindow is transparent. */
+.options-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--background);
 }
 
 .settings-group {
@@ -345,10 +387,16 @@ textarea::placeholder {
 }
 
 .button-group {
-  margin-top: auto;
+  /* Pin the button group to the bottom of the options window */
+  margin-top: 0;
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0; /* vertical padding inside the footer */
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  background: var(--background); /* ensure the footer matches the page background */
 }
 
 .button {

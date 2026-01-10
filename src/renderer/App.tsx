@@ -134,19 +134,24 @@ const Options: React.FC = () => {
         };
     }, [theme]);
 
-    // Keyboard shortcuts: Enter to save (unless Shift+Enter), Escape to cancel
+    // Keyboard shortcuts: Enter to save (unless Shift+Enter), Escape to save+exit
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
                 e.preventDefault();
-                window.close();
+                // Save and close
+                (async () => {
+                    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines } as any ) });
+                    window.close();
+                })();
+                return;
             }
             if (e.key === 'Enter' && !e.shiftKey) {
                 // Don't trigger when focus is in a textarea (to allow newline)
                 const active = document.activeElement;
                 if (active && active.tagName === 'TEXTAREA') return;
                 e.preventDefault();
-                // call the same save function used by the Save button
+                // Save settings immediately and close
                 (async () => {
                     await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines } as any ) });
                     window.close();
@@ -155,18 +160,66 @@ const Options: React.FC = () => {
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-    }, [vaultPath, theme]);
+    }, [vaultPath, theme, maxLines]);
 
-    const handleSave = async () => {
-    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines } as any ) });
-        window.close();
-    };
 
-    if (isLoading) return <div className="options-page">Loading...</div>;
+    const pageRef = useRef<HTMLDivElement | null>(null);
+    const resizeTimeout = useRef<number | null>(null);
+
+    useEffect(() => {
+        if (!pageRef.current) return;
+
+        const sendHeight = () => {
+            const el = pageRef.current!;
+            // compute the total height including paddings
+            const style = window.getComputedStyle(el);
+            const paddingTop = parseFloat(style.paddingTop || '0');
+            const paddingBottom = parseFloat(style.paddingBottom || '0');
+            const total = Math.ceil(el.scrollHeight + paddingTop + paddingBottom);
+            try {
+                window.api.resizeOptionsWindow(total);
+            } catch (e) {
+                // ignore in non-electron environments
+            }
+        };
+
+        // Debounced ResizeObserver
+        const ro = new ResizeObserver(() => {
+            if (resizeTimeout.current) window.clearTimeout(resizeTimeout.current);
+            // @ts-ignore - window.setTimeout returns number in browsers
+            resizeTimeout.current = window.setTimeout(() => sendHeight(), 80) as unknown as number;
+        });
+
+        ro.observe(pageRef.current);
+        // send initial height
+        sendHeight();
+
+        return () => {
+            ro.disconnect();
+            if (resizeTimeout.current) window.clearTimeout(resizeTimeout.current);
+        };
+    }, [isLoading, vaultPath, theme, maxLines, vaults]);
+
+    if (isLoading) return <div className="options-page" ref={pageRef}>Loading...</div>;
 
     return (
-        <div className="options-page">
-            <h1>Settings</h1>
+        <div className="options-page" ref={pageRef}>
+            {/* visual background layer that doesn't affect layout/height */}
+            <div className="options-bg" aria-hidden="true" />
+            <div className="options-header">
+                <h1>Settings</h1>
+                <button
+                    className="options-close"
+                    onClick={() => window.close()}
+                    aria-label="Close settings"
+                    title="Close"
+                >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
 
             <div className="settings-group">
                 <label htmlFor="vault-select">Select Obsidian Vault</label>
@@ -210,10 +263,7 @@ const Options: React.FC = () => {
                 />
             </div>
 
-            <div className="button-group">
-                <button className="button button-secondary" onClick={() => window.close()}>Cancel</button>
-                <button className="button button-primary" onClick={handleSave}>Save</button>
-            </div>
+            {/* Save/Cancel buttons removed per user request */}
         </div>
     );
 };

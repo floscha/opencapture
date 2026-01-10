@@ -376,13 +376,50 @@ const CommandBar: React.FC = () => {
         const outputMenuItems = ['Inbox', 'Daily Note'] as const;
         
         const handler = async (e: KeyboardEvent) => {
+            // Cmd+Shift+T => pause (or resume if already paused)
+            if ((e.key === 't' || e.key === 'T') && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+                e.preventDefault();
+                try {
+                    window.api.lockAutoHide();
+                    // togglePause will pause if running, resume if paused, or start if none
+                    if (window.api.togglePause) {
+                        await window.api.togglePause(text, destination);
+                    } else {
+                        // fallback: try to pause by stopping (best-effort)
+                        await window.api.toggleTimer(text, destination);
+                    }
+                } catch (err) {
+                    console.error('Failed to toggle pause for timer', err);
+                } finally {
+                    window.api.unlockAutoHide();
+                }
+                return;
+            }
+            // Cmd+T => start or stop the timer explicitly
             if ((e.key === 't' || e.key === 'T') && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 try {
-                        window.api.lockAutoHide();
-                        await window.api.toggleTimer(text, destination);
+                    window.api.lockAutoHide();
+                    // Query state first to decide whether to start or stop
+                    let state: any = null;
+                    if (window.api.getTimerState) {
+                        try { state = await window.api.getTimerState(); } catch { state = null; }
+                    }
+                    if (state && state.running) {
+                        // stop running timer
+                        if (window.api.stopTimer) await window.api.stopTimer();
+                        else if (window.api.toggleTimer) await window.api.toggleTimer(text, destination);
+                    } else if (state && state.paused) {
+                        // if paused, end it
+                        if (window.api.stopTimer) await window.api.stopTimer();
+                        else if (window.api.toggleTimer) await window.api.toggleTimer(text, destination);
+                    } else {
+                        // start
+                        if (window.api.startTimer) await window.api.startTimer(text, destination);
+                        else if (window.api.toggleTimer) await window.api.toggleTimer(text, destination);
+                    }
                 } catch (err) {
-                    console.error('Failed to toggle timer', err);
+                    console.error('Failed to start/stop timer', err);
                 } finally {
                     window.api.unlockAutoHide();
                 }

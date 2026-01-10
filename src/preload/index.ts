@@ -19,7 +19,10 @@ contextBridge.exposeInMainWorld('api', {
     toggleTimer: (description: string, destination?: 'Inbox' | 'Daily Note') => ipcRenderer.invoke('toggle-timer', description, destination),
     startTimer: (description: string, destination?: 'Inbox' | 'Daily Note') => ipcRenderer.invoke('start-timer', description, destination),
     stopTimer: () => ipcRenderer.invoke('stop-timer'),
+    // Pause/resume without stopping/recording the timer
+    togglePause: (description?: string, destination?: 'Inbox' | 'Daily Note') => ipcRenderer.invoke('toggle-pause-timer', description, destination),
     // Timer state queries and subscription
+        getTimerState: () => ipcRenderer.invoke('get-timer-state'),
     // Note: getTimerState/onTimerTick removed (no in-app indicator). Timer remains visible in menu bar/tray.
     // Temporarily prevent the main window from auto-hiding (useful around toggle calls)
     lockAutoHide: () => ipcRenderer.send('lock-auto-hide'),

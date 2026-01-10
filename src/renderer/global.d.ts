@@ -14,6 +14,8 @@ export interface IElectronAPI {
     toggleTimer: (description: string, destination?: 'Inbox' | 'Daily Note') => Promise<{ running: boolean } | void>;
     startTimer: (description: string, destination?: 'Inbox' | 'Daily Note') => Promise<{ running: true } | void>;
     stopTimer: () => Promise<{ running: false } | void>;
+    togglePause: (description?: string, destination?: 'Inbox' | 'Daily Note') => Promise<{ paused: boolean } | void>;
+    getTimerState: () => Promise<{ running: boolean; paused?: boolean; elapsed?: number; description?: string } | void>;
     lockAutoHide: () => void;
     unlockAutoHide: () => void;
 }

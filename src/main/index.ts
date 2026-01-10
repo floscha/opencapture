@@ -26,6 +26,8 @@ let timerInterval: NodeJS.Timeout | null = null;
 let timerStart: number | null = null; // epoch ms when timer started
 let timerDescription = '';
 let timerDestination: 'Inbox' | 'Daily Note' | null = null;
+let timerPaused = false;
+let timerPausedElapsed = 0; // accumulated elapsed ms while paused
 let autoHideLocked = false;
 
 async function loadSettings() {
@@ -343,10 +345,19 @@ function formatElapsed(ms: number) {
 }
 
 function updateTrayTitle() {
-    if (!tray || timerStart === null) return;
-    const elapsed = Date.now() - timerStart;
+    if (!tray) return;
+    let elapsed = 0;
+    if (timerStart !== null) {
+        elapsed = Date.now() - timerStart;
+    } else if (timerPaused) {
+        elapsed = timerPausedElapsed;
+    } else {
+        return;
+    }
     const timeStr = formatElapsed(elapsed);
-    const title = `${timeStr} - ${timerDescription}`;
+    // When paused, append ' (paused)' in lowercase brackets at the end
+    const base = `${timeStr} - ${timerDescription}`;
+    const title = timerPaused ? `${base} (paused)` : base;
     // setTitle works on macOS to show text in status bar
     try {
         tray.setTitle(title);
@@ -355,7 +366,7 @@ function updateTrayTitle() {
     }
     // Broadcast timer tick to renderer windows
     try {
-        const state = { running: true, elapsed, description: timerDescription };
+        const state = { running: true, elapsed, description: timerDescription, paused: !!timerPaused };
         BrowserWindow.getAllWindows().forEach(w => w.webContents.send('timer-tick', state));
     } catch (e) {
         // ignore
@@ -369,7 +380,14 @@ ipcMain.handle('start-timer', async (_event, description: string, destination?: 
     }
     timerDescription = description || '';
     if (destination) timerDestination = destination;
-    timerStart = Date.now();
+    // If currently paused, resume from accumulated elapsed
+    if (timerPaused) {
+        timerStart = Date.now() - timerPausedElapsed;
+        timerPaused = false;
+        timerPausedElapsed = 0;
+    } else {
+        timerStart = Date.now();
+    }
     // If destination provided via args, it will be set by caller; otherwise keep existing
     ensureTray();
     updateTrayTitle();
@@ -378,6 +396,9 @@ ipcMain.handle('start-timer', async (_event, description: string, destination?: 
 });
 
 ipcMain.handle('stop-timer', async () => {
+    // stopping should also clear paused state
+    timerPaused = false;
+    timerPausedElapsed = 0;
     await stopTimerLogic();
     return { running: false };
 });
@@ -385,21 +406,37 @@ ipcMain.handle('stop-timer', async () => {
 ipcMain.handle('toggle-timer', async (_event, description: string, destination?: 'Inbox' | 'Daily Note') => {
     if (destination) timerDestination = destination;
     if (timerInterval) {
-        // stop
+        // stop (fully end timer and record)
         if (timerInterval) {
             clearInterval(timerInterval as NodeJS.Timeout);
             timerInterval = null;
         }
-    timerStart = null;
-    timerDescription = '';
-    // clear destination
-    timerDestination = null;
+        timerStart = null;
+        timerDescription = '';
+        // clear destination
+        timerDestination = null;
+        // clear paused state just in case
+        timerPaused = false;
+        timerPausedElapsed = 0;
         if (tray) {
             try { tray.setTitle(''); } catch (e) {}
         }
         try { BrowserWindow.getAllWindows().forEach(w => w.webContents.send('timer-tick', { running: false })); } catch (e) {}
         return { running: false };
     } else {
+        // If paused, resume instead of starting fresh
+        if (timerPaused) {
+            // resume
+            timerStart = Date.now() - timerPausedElapsed;
+            timerPaused = false;
+            timerPausedElapsed = 0;
+            ensureTray();
+            updateTrayTitle();
+            timerInterval = setInterval(updateTrayTitle, 1000);
+            updateTrayMenu();
+            try { BrowserWindow.getAllWindows().forEach(w => w.webContents.send('timer-tick', { running: true, elapsed: Date.now() - timerStart!, description: timerDescription })); } catch (e) {}
+            return { running: true };
+        }
         timerDescription = description || '';
         // timerDestination may have been set from args above
         timerStart = Date.now();
@@ -413,11 +450,48 @@ ipcMain.handle('toggle-timer', async (_event, description: string, destination?:
     }
 });
 
+// Toggle pause/resume without stopping/recording
+ipcMain.handle('toggle-pause-timer', async (_event, description?: string, destination?: 'Inbox' | 'Daily Note') => {
+    if (destination) timerDestination = destination;
+    if (description) timerDescription = description;
+    if (timerInterval) {
+        // currently running -> pause
+        if (timerInterval) {
+            clearInterval(timerInterval as NodeJS.Timeout);
+            timerInterval = null;
+        }
+        if (timerStart !== null) {
+            timerPausedElapsed += Date.now() - timerStart;
+        }
+        timerStart = null;
+        timerPaused = true;
+        // Update tray to show paused
+        updateTrayTitle();
+        try { BrowserWindow.getAllWindows().forEach(w => w.webContents.send('timer-tick', { running: false, paused: true, elapsed: timerPausedElapsed, description: timerDescription })); } catch (e) {}
+        return { paused: true };
+    } else if (timerPaused) {
+        // resume from paused
+        timerStart = Date.now() - timerPausedElapsed;
+        timerPaused = false;
+        timerPausedElapsed = 0;
+        ensureTray();
+        updateTrayTitle();
+        timerInterval = setInterval(updateTrayTitle, 1000);
+        updateTrayMenu();
+        try { BrowserWindow.getAllWindows().forEach(w => w.webContents.send('timer-tick', { running: true, elapsed: Date.now() - timerStart!, description: timerDescription })); } catch (e) {}
+        return { paused: false };
+    }
+    // neither running nor paused -> nothing to pause/resume
+    // Return paused:false to indicate no pause state changed.
+    return { paused: false };
+});
+
 ipcMain.handle('get-timer-state', async () => {
     if (timerStart === null) {
-        return { running: false };
+        // Not currently running: report paused flag and paused elapsed if applicable
+        return { running: false, paused: !!timerPaused, elapsed: timerPaused ? timerPausedElapsed : undefined, description: timerDescription };
     }
-    return { running: true, elapsed: Date.now() - timerStart!, description: timerDescription };
+    return { running: true, elapsed: Date.now() - timerStart!, description: timerDescription, paused: false };
 });
 
 // Get active browser tab (macOS) for Google Chrome using AppleScript

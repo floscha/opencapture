@@ -213,6 +213,9 @@ const CommandBar: React.FC = () => {
     const [showInsertMenu, setShowInsertMenu] = useState(false);
     const [selectedInsertIndex, setSelectedInsertIndex] = useState(0);
     const cmdPressedRef = useRef(false);
+    const [showOutputMenu, setShowOutputMenu] = useState(false);
+    const [selectedOutputIndex, setSelectedOutputIndex] = useState(1); // 0 = Inbox, 1 = Daily Note
+    const cmdOPressedRef = useRef(false);
 
     // Auto-resize textarea and window
     useEffect(() => {
@@ -230,7 +233,7 @@ const CommandBar: React.FC = () => {
                 }
             });
         }
-    }, [text, showInsertMenu]);
+    }, [text, showInsertMenu, showOutputMenu]);
 
     // Close insert menu when clicking outside
     useEffect(() => {
@@ -249,10 +252,28 @@ const CommandBar: React.FC = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [showInsertMenu]);
 
+    // Close output menu when clicking outside
+    useEffect(() => {
+        if (!showOutputMenu) return;
+        
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest('.output-menu') && !target.closest('.destination-text')) {
+                setShowOutputMenu(false);
+                setSelectedOutputIndex(destination === 'Inbox' ? 0 : 1);
+                cmdOPressedRef.current = false;
+            }
+        };
+        
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showOutputMenu, destination]);
+
     // Global keydown for Cmd+T to toggle timer even when textarea isn't focused
     // Also handle Cmd+I (insert tab) and Cmd+O (cycle destination)
     useEffect(() => {
         const insertMenuItems = ['clipboard', 'browserTab'] as const;
+        const outputMenuItems = ['Inbox', 'Daily Note'] as const;
         
         const handler = async (e: KeyboardEvent) => {
             if ((e.key === 't' || e.key === 'T') && (e.metaKey || e.ctrlKey)) {
@@ -266,13 +287,20 @@ const CommandBar: React.FC = () => {
                     window.api.unlockAutoHide();
                 }
             }
-            // Cmd+O: cycle destination between Inbox and Daily Note
+            // Cmd+O: show output menu and cycle through options while cmd is held
             if ((e.key === 'o' || e.key === 'O') && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 e.stopPropagation();
-                setDestination((prev) => (prev === 'Inbox' ? 'Daily Note' : 'Inbox'));
-                // Return focus to the textarea
-                requestAnimationFrame(() => textareaRef.current?.focus());
+                
+                if (!showOutputMenu) {
+                    // First press: show menu with current destination selected
+                    setShowOutputMenu(true);
+                    setSelectedOutputIndex(destination === 'Inbox' ? 0 : 1);
+                    cmdOPressedRef.current = true;
+                } else if (cmdOPressedRef.current) {
+                    // Subsequent presses while cmd held: cycle to next option
+                    setSelectedOutputIndex((prev) => (prev + 1) % outputMenuItems.length);
+                }
             }
             // Cmd+I: show insert menu and cycle through items while cmd is held
             if ((e.key === 'i' || e.key === 'I') && (e.metaKey || e.ctrlKey)) {
@@ -292,15 +320,30 @@ const CommandBar: React.FC = () => {
         
         const keyupHandler = async (e: KeyboardEvent) => {
             // When cmd key is released, trigger the selected item
-            if ((e.key === 'Meta' || e.key === 'Control') && cmdPressedRef.current && showInsertMenu) {
-                cmdPressedRef.current = false;
+            if ((e.key === 'Meta' || e.key === 'Control')) {
+                if (cmdPressedRef.current && showInsertMenu) {
+                    cmdPressedRef.current = false;
+                    
+                    // Trigger the selected insert item
+                    const selectedItem = insertMenuItems[selectedInsertIndex];
+                    if (selectedItem === 'clipboard') {
+                        await handleInsertClipboard();
+                    } else if (selectedItem === 'browserTab') {
+                        await handleInsertBrowserTab();
+                    }
+                }
                 
-                // Trigger the selected item
-                const selectedItem = insertMenuItems[selectedInsertIndex];
-                if (selectedItem === 'clipboard') {
-                    await handleInsertClipboard();
-                } else if (selectedItem === 'browserTab') {
-                    await handleInsertBrowserTab();
+                if (cmdOPressedRef.current && showOutputMenu) {
+                    cmdOPressedRef.current = false;
+                    
+                    // Set the selected output destination
+                    const selectedOutput = outputMenuItems[selectedOutputIndex];
+                    setDestination(selectedOutput);
+                    setShowOutputMenu(false);
+                    setSelectedOutputIndex(selectedOutput === 'Inbox' ? 0 : 1);
+                    
+                    // Return focus to the textarea
+                    requestAnimationFrame(() => textareaRef.current?.focus());
                 }
             }
         };
@@ -311,16 +354,23 @@ const CommandBar: React.FC = () => {
             window.removeEventListener('keydown', handler);
             window.removeEventListener('keyup', keyupHandler);
         };
-    }, [text, showInsertMenu, selectedInsertIndex]);
+    }, [text, showInsertMenu, selectedInsertIndex, showOutputMenu, selectedOutputIndex, destination]);
 
     const handleKeyDown = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        // Escape: close insert menu if open, otherwise hide window
+        // Escape: close insert menu or output menu if open, otherwise hide window
         if (e.key === 'Escape') {
             if (showInsertMenu) {
                 e.preventDefault();
                 setShowInsertMenu(false);
                 setSelectedInsertIndex(0);
                 cmdPressedRef.current = false;
+                return;
+            }
+            if (showOutputMenu) {
+                e.preventDefault();
+                setShowOutputMenu(false);
+                setSelectedOutputIndex(destination === 'Inbox' ? 0 : 1);
+                cmdOPressedRef.current = false;
                 return;
             }
             window.api.hideWindow();
@@ -464,9 +514,12 @@ const CommandBar: React.FC = () => {
         }
     };
 
-    const handleDestinationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        setDestination(e.target.value as 'Inbox' | 'Daily Note');
-        // Return focus to the textarea after changing destination
+    const handleOutputSelect = (newDestination: 'Inbox' | 'Daily Note') => {
+        setDestination(newDestination);
+        setShowOutputMenu(false);
+        setSelectedOutputIndex(newDestination === 'Inbox' ? 0 : 1);
+        cmdOPressedRef.current = false;
+        // Return focus to the textarea
         requestAnimationFrame(() => {
             textareaRef.current?.focus();
         });
@@ -577,6 +630,23 @@ const CommandBar: React.FC = () => {
                     </div>
                 </div>
             )}
+            {showOutputMenu && (
+                <div className="output-menu">
+                    <div className="menu-header">Select an output</div>
+                    <div 
+                        className={`menu-item ${selectedOutputIndex === 0 ? 'selected' : ''}`}
+                        onClick={() => handleOutputSelect('Inbox')}
+                    >
+                        Inbox
+                    </div>
+                    <div 
+                        className={`menu-item ${selectedOutputIndex === 1 ? 'selected' : ''}`}
+                        onClick={() => handleOutputSelect('Daily Note')}
+                    >
+                        Daily Note
+                    </div>
+                </div>
+            )}
             <div className="footer">
                 <div className="footer-left">
                     <div className="options-container">
@@ -594,19 +664,18 @@ const CommandBar: React.FC = () => {
                 </div>
                 <div className="footer-right">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <select
-                            className="destination-select"
-                            value={destination}
-                            onChange={handleDestinationChange}
-                            aria-label="Capture destination"
-                        >
-                            <option value="Inbox">Inbox</option>
-                            <option value="Daily Note">Daily Note</option>
-                        </select>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div><span className="key">↵</span> Capture</div>
-                        </div>
+                        <div>Capture to <span 
+                            className="destination-text" 
+                            onClick={() => {
+                                setShowOutputMenu(!showOutputMenu);
+                                if (!showOutputMenu) {
+                                    setSelectedOutputIndex(destination === 'Inbox' ? 0 : 1);
+                                }
+                            }}
+                        >{destination}</span> with <span 
+                            className="key" 
+                            onClick={handleSubmit}
+                        >↵</span></div>
                     </div>
                 </div>
             </div>

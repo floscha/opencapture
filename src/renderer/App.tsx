@@ -394,6 +394,9 @@ const CommandBar: React.FC = () => {
                 
                 if (!showOutputMenu) {
                     // First press: show menu with current destination selected
+                    // ensure insert menu is closed when opening output menu
+                    setShowInsertMenu(false);
+                    setSelectedInsertIndex(0);
                     setShowOutputMenu(true);
                     setSelectedOutputIndex(destination === 'Inbox' ? 0 : 1);
                     cmdOPressedRef.current = true;
@@ -408,6 +411,9 @@ const CommandBar: React.FC = () => {
                 
                 if (!showInsertMenu) {
                     // First press: show menu with first item selected
+                    // ensure output menu is closed when opening insert menu
+                    setShowOutputMenu(false);
+                    setSelectedOutputIndex(destination === 'Inbox' ? 0 : 1);
                     setShowInsertMenu(true);
                     setSelectedInsertIndex(0);
                     cmdPressedRef.current = true;
@@ -767,10 +773,14 @@ const CommandBar: React.FC = () => {
                         <div>Capture to <span 
                             className="destination-text" 
                             onClick={() => {
-                                setShowOutputMenu(!showOutputMenu);
-                                if (!showOutputMenu) {
+                                // toggle output menu; ensure insert menu is closed when opening output
+                                const willOpen = !showOutputMenu;
+                                if (willOpen) {
+                                    setShowInsertMenu(false);
+                                    setSelectedInsertIndex(0);
                                     setSelectedOutputIndex(destination === 'Inbox' ? 0 : 1);
                                 }
+                                setShowOutputMenu(willOpen);
                             }}
                         >{destination}</span> with <span 
                             className="key" 

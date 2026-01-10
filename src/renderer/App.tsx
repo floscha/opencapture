@@ -83,6 +83,7 @@ const App: React.FC = () => {
 const Options: React.FC = () => {
     const [vaultPath, setVaultPath] = useState('');
     const [theme, setTheme] = useState<'dark' | 'light' | 'system'>('system');
+    const [maxLines, setMaxLines] = useState<number>(10);
     const [vaults, setVaults] = useState<{ name: string; path: string }[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -94,6 +95,7 @@ const Options: React.FC = () => {
             ]);
             setVaultPath(settings.vaultPath);
             setTheme(settings.theme ?? 'system');
+            setMaxLines(typeof (settings as any).maxLines === 'number' ? (settings as any).maxLines : 10);
             setVaults(availableVaults);
             setIsLoading(false);
         };
@@ -146,7 +148,7 @@ const Options: React.FC = () => {
                 e.preventDefault();
                 // call the same save function used by the Save button
                 (async () => {
-                    await window.api.updateSettings({ vaultPath: vaultPath, theme });
+                    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines } as any ) });
                     window.close();
                 })();
             }
@@ -156,7 +158,7 @@ const Options: React.FC = () => {
     }, [vaultPath, theme]);
 
     const handleSave = async () => {
-        await window.api.updateSettings({ vaultPath: vaultPath, theme });
+    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines } as any ) });
         window.close();
     };
 
@@ -196,6 +198,18 @@ const Options: React.FC = () => {
                 </select>
             </div>
 
+            <div className="settings-group">
+                <label htmlFor="max-lines">Max text field lines</label>
+                <input
+                    id="max-lines"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={maxLines}
+                    onChange={(e) => setMaxLines(Math.max(1, Number(e.target.value) || 1))}
+                />
+            </div>
+
             <div className="button-group">
                 <button className="button button-secondary" onClick={() => window.close()}>Cancel</button>
                 <button className="button button-primary" onClick={handleSave}>Save</button>
@@ -216,14 +230,28 @@ const CommandBar: React.FC = () => {
     const [showOutputMenu, setShowOutputMenu] = useState(false);
     const [selectedOutputIndex, setSelectedOutputIndex] = useState(1); // 0 = Inbox, 1 = Daily Note
     const cmdOPressedRef = useRef(false);
+    const [maxLines, setMaxLines] = useState<number>(10);
 
     // Auto-resize textarea and window
     useEffect(() => {
         if (textareaRef.current && containerRef.current) {
-            textareaRef.current.style.height = 'auto';
-            const scrollHeight = textareaRef.current.scrollHeight;
-            const newHeight = Math.max(60, scrollHeight);
-            textareaRef.current.style.height = `${newHeight}px`;
+            const ta = textareaRef.current;
+            // reset height to measure scrollHeight
+            ta.style.height = 'auto';
+            const scrollHeight = ta.scrollHeight;
+
+            // compute approximate line height
+            const cs = window.getComputedStyle(ta);
+            const lineHeight = parseFloat(cs.lineHeight) || 20; // fallback 20px
+            const maxAllowedHeight = Math.max(60, lineHeight * maxLines);
+
+            if (scrollHeight > maxAllowedHeight) {
+                ta.style.height = `${maxAllowedHeight}px`;
+                ta.style.overflowY = 'auto';
+            } else {
+                ta.style.height = `${Math.max(60, scrollHeight)}px`;
+                ta.style.overflowY = 'hidden';
+            }
 
             // Use requestAnimationFrame to ensure DOM has updated before measuring
             requestAnimationFrame(() => {
@@ -233,7 +261,7 @@ const CommandBar: React.FC = () => {
                 }
             });
         }
-    }, [text, showInsertMenu, showOutputMenu]);
+    }, [text, showInsertMenu, showOutputMenu, maxLines]);
 
     // Close insert menu when clicking outside
     useEffect(() => {
@@ -268,6 +296,28 @@ const CommandBar: React.FC = () => {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [showOutputMenu, destination]);
+
+    // Load maxLines from settings (and keep in sync)
+    useEffect(() => {
+        const setup = async () => {
+            try {
+                const settings = await window.api.getSettings();
+                setMaxLines(typeof (settings as any).maxLines === 'number' ? (settings as any).maxLines : 10);
+            } catch (err) {
+                console.warn('Could not load maxLines setting', err);
+            }
+        };
+
+        setup();
+
+        const unsub = window.api.onSettingsUpdated((s) => {
+            setMaxLines(typeof (s as any).maxLines === 'number' ? (s as any).maxLines : 10);
+        });
+
+        return () => {
+            try { unsub(); } catch (e) {}
+        };
+    }, []);
 
     // Global keydown for Cmd+T to toggle timer even when textarea isn't focused
     // Also handle Cmd+I (insert tab) and Cmd+O (cycle destination)

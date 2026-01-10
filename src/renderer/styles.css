@@ -74,7 +74,7 @@ textarea {
   background: transparent;
   border: none;
   color: var(--text);
-  font-size: 24px;
+  font-size: 16px;
   padding: var(--spacing);
   outline: none;
   resize: none;

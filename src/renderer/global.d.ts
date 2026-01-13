@@ -5,9 +5,29 @@ export interface IElectronAPI {
     resizeWindow: (height: number) => void;
     resizeOptionsWindow: (height: number) => void;
     // theme: 'dark' | 'light' | 'system' - 'system' means match OS preference
-    getSettings: () => Promise<{ vaultPath: string; theme?: 'dark' | 'light' | 'system' }>;
-    updateSettings: (settings: { vaultPath?: string; theme?: 'dark' | 'light' | 'system' }) => Promise<{ vaultPath: string; theme?: 'dark' | 'light' | 'system' }>;
-    onSettingsUpdated: (callback: (settings: { vaultPath?: string; theme?: 'dark' | 'light' | 'system' }) => void) => () => void;
+    getSettings: () => Promise<{
+        vaultPath: string;
+        theme?: 'dark' | 'light' | 'system';
+        outputs?: Array<{ name: string; path: string; id?: 'inbox' | 'daily-note' }>;
+        maxLines?: number;
+    }>;
+    updateSettings: (settings: {
+        vaultPath?: string;
+        theme?: 'dark' | 'light' | 'system';
+        outputs?: Array<{ name: string; path: string; id?: 'inbox' | 'daily-note' }>;
+        maxLines?: number;
+    }) => Promise<{
+        vaultPath: string;
+        theme?: 'dark' | 'light' | 'system';
+        outputs?: Array<{ name: string; path: string; id?: 'inbox' | 'daily-note' }>;
+        maxLines?: number;
+    }>;
+    onSettingsUpdated: (callback: (settings: {
+        vaultPath?: string;
+        theme?: 'dark' | 'light' | 'system';
+        outputs?: Array<{ name: string; path: string; id?: 'inbox' | 'daily-note' }>;
+        maxLines?: number;
+    }) => void) => () => void;
     listVaults: () => Promise<{ name: string; path: string }[]>;
     openOptions: () => void;
     getActiveBrowserTab: () => Promise<{ success: boolean; title?: string; url?: string; error?: string }>;

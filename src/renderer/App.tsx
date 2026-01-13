@@ -84,6 +84,7 @@ const Options: React.FC = () => {
     const [vaultPath, setVaultPath] = useState('');
     const [theme, setTheme] = useState<'dark' | 'light' | 'system'>('system');
     const [maxLines, setMaxLines] = useState<number>(10);
+    const [outputs, setOutputs] = useState<Array<{ name: string; path: string; id?: 'inbox' | 'daily-note' }>>([]);
     const [vaults, setVaults] = useState<{ name: string; path: string }[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -96,6 +97,7 @@ const Options: React.FC = () => {
             setVaultPath(settings.vaultPath);
             setTheme(settings.theme ?? 'system');
             setMaxLines(typeof (settings as any).maxLines === 'number' ? (settings as any).maxLines : 10);
+            setOutputs(Array.isArray((settings as any).outputs) ? (settings as any).outputs : []);
             setVaults(availableVaults);
             setIsLoading(false);
         };
@@ -141,7 +143,7 @@ const Options: React.FC = () => {
                 e.preventDefault();
                 // Save and close
                 (async () => {
-                    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines } as any ) });
+                    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines, outputs } as any ) });
                     window.close();
                 })();
                 return;
@@ -153,14 +155,14 @@ const Options: React.FC = () => {
                 e.preventDefault();
                 // Save settings immediately and close
                 (async () => {
-                    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines } as any ) });
+                    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines, outputs } as any ) });
                     window.close();
                 })();
             }
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-    }, [vaultPath, theme, maxLines]);
+    }, [vaultPath, theme, maxLines, outputs]);
 
 
     const pageRef = useRef<HTMLDivElement | null>(null);
@@ -198,7 +200,7 @@ const Options: React.FC = () => {
             ro.disconnect();
             if (resizeTimeout.current) window.clearTimeout(resizeTimeout.current);
         };
-    }, [isLoading, vaultPath, theme, maxLines, vaults]);
+    }, [isLoading, vaultPath, theme, maxLines, outputs, vaults]);
 
     if (isLoading) return <div className="options-page" ref={pageRef}>Loading...</div>;
 
@@ -263,7 +265,83 @@ const Options: React.FC = () => {
                 />
             </div>
 
-            {/* Save/Cancel buttons removed per user request */}
+            <div className="settings-group">
+                <label>Outputs</label>
+                <div className="outputs-settings">
+                    <div className="outputs-help">
+                        Set a name and a <strong>vault-relative</strong> path.
+                        {' '}You can use placeholders like <code>yyyy</code>, <code>mm</code>, <code>dd</code>.
+                    </div>
+
+                    {outputs.length === 0 && (
+                        <div className="outputs-empty">
+                            No outputs configured yet. Add one below, or restart the app to get defaults.
+                        </div>
+                    )}
+
+                    {outputs.map((out, idx) => (
+                        <div key={out.id ?? `${out.name}-${idx}`} className="outputs-row">
+                            <input
+                                type="text"
+                                value={out.name}
+                                placeholder="Output name (e.g. Inbox)"
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    setOutputs(prev => prev.map((o, i) => i === idx ? { ...o, name: v } : o));
+                                }}
+                            />
+                            <input
+                                type="text"
+                                value={out.path}
+                                placeholder="Path in vault (e.g. 0_Inbox/Inbox.md)"
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    setOutputs(prev => prev.map((o, i) => i === idx ? { ...o, path: v } : o));
+                                }}
+                            />
+                            <button
+                                type="button"
+                                className="outputs-remove options-close"
+                                title={out.id ? 'Built-in output cannot be removed' : 'Remove output'}
+                                aria-label="Remove output"
+                                disabled={!!out.id}
+                                onClick={() => {
+                                    if (out.id) return;
+                                    setOutputs(prev => prev.filter((_, i) => i !== idx));
+                                }}
+                            >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        </div>
+                    ))}
+
+                    <div className="outputs-actions">
+                        <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => setOutputs(prev => [...prev, { name: 'New Output', path: '' }])}
+                        >
+                            Add output
+                        </button>
+                        <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => {
+                                // restore reasonable defaults (without requiring restart)
+                                setOutputs([
+                                    { id: 'inbox', name: 'Inbox', path: 'Inbox.md' },
+                                    { id: 'daily-note', name: 'Daily Note', path: 'yyyy-mm-dd.md' },
+                                ]);
+                            }}
+                        >
+                            Reset to defaults
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 };

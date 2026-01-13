@@ -1,6 +1,6 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Tray, nativeImage, Menu, screen } from 'electron';
 import { exec } from 'child_process';
-import { join } from 'path';
+import { join, resolve, relative, sep, dirname } from 'path';
 import { promises as fs } from 'fs';
 import { homedir } from 'os';
 
@@ -11,12 +11,108 @@ const SETTINGS_FILE_PATH = join(app.getPath('userData'), 'settings.json');
 interface Settings {
     vaultPath: string;
     theme?: 'dark' | 'light' | 'system';
+    outputs?: OutputConfig[];
+}
+
+type BuiltInOutputId = 'inbox' | 'daily-note';
+
+interface OutputConfig {
+    /** User-visible name, e.g. "Inbox" */
+    name: string;
+    /** Relative path within the vault, e.g. "0_Inbox/Inbox.md" or "5_Calendar/yyyy-mm-dd.md" */
+    path: string;
+    /** Optional stable id for built-in outputs so older calls keep working */
+    id?: BuiltInOutputId;
 }
 
 const getInitialSettings = (): Settings => ({
-    vaultPath: ''
-    , theme: 'system'
+    vaultPath: '',
+    theme: 'system',
+    outputs: [
+        { id: 'inbox', name: 'Inbox', path: 'Inbox/Inbox.md' },
+        { id: 'daily-note', name: 'Daily Note', path: 'Calendar/yyyy-mm-dd.md' },
+    ],
 });
+
+function expandPathPlaceholders(template: string, now = new Date()): string {
+    const yyyy = String(now.getFullYear());
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+
+    // Support yyyy-mm-dd anywhere in string, plus individual tokens.
+    return template
+        .replaceAll('yyyy-mm-dd', `${yyyy}-${mm}-${dd}`)
+        .replaceAll('yyyy', yyyy)
+        .replaceAll('mm', mm)
+        .replaceAll('dd', dd);
+}
+
+async function resolveVaultFilePath(vaultPath: string, relativePath: string): Promise<string> {
+    // Normalize to prevent absolute paths and traversal.
+    const normalizedRel = relativePath.replace(/^[\\/]+/, '').replaceAll('\\', '/');
+    const abs = resolve(vaultPath, normalizedRel);
+
+    const vaultResolved = resolve(vaultPath);
+    const vaultPrefix = vaultResolved.endsWith(sep) ? vaultResolved : vaultResolved + sep;
+
+    // Fast path: purely lexical check after resolve().
+    if (!(abs === vaultResolved || abs.startsWith(vaultPrefix))) {
+        throw new Error('Output path must be inside the selected vault');
+    }
+
+    // Tighten using real paths (symlink-aware) when possible.
+    // We resolve the vault root and the nearest existing parent directory of the target.
+    try {
+        const vaultReal = await fs.realpath(vaultResolved);
+
+        // find nearest existing parent of abs
+        let probe = abs;
+        // For a file path, start at its directory.
+        probe = dirname(probe);
+
+        while (true) {
+            try {
+                const st = await fs.stat(probe);
+                if (st.isDirectory()) break;
+            } catch {
+                // keep walking up
+            }
+            const parent = dirname(probe);
+            if (parent === probe) break;
+            probe = parent;
+        }
+
+        const probeReal = await fs.realpath(probe);
+        const vaultRealPrefix = vaultReal.endsWith(sep) ? vaultReal : vaultReal + sep;
+        if (!(probeReal === vaultReal || probeReal.startsWith(vaultRealPrefix))) {
+            throw new Error('Output path must be inside the selected vault');
+        }
+    } catch {
+        // If realpath/stat fails (e.g. vault temporarily unavailable), keep the resolve() based check.
+    }
+
+    return abs;
+}
+
+function getOutputById(id: BuiltInOutputId): OutputConfig {
+    const outputs = settings.outputs ?? getInitialSettings().outputs ?? [];
+    const found = outputs.find(o => o.id === id);
+    if (found) return found;
+    // fallback to defaults
+    const fallback = (getInitialSettings().outputs ?? []).find(o => o.id === id);
+    if (!fallback) throw new Error(`Missing output configuration for ${id}`);
+    return fallback;
+}
+
+async function appendToOutput(output: OutputConfig, text: string, now = new Date()) {
+    if (!settings.vaultPath) {
+        throw new Error('No vault selected. Please go to settings.');
+    }
+    const expandedRel = expandPathPlaceholders(output.path, now);
+    const absFile = await resolveVaultFilePath(settings.vaultPath, expandedRel);
+    await fs.mkdir(dirname(absFile), { recursive: true });
+    await fs.appendFile(absFile, `\n${text}`, 'utf8');
+}
 
 let settings: Settings = getInitialSettings();
 let mainWindow: BrowserWindow | null = null;
@@ -127,17 +223,8 @@ const createOptionsWindow = () => {
 // IPC Handlers
 ipcMain.handle('append-to-inbox', async (_event, text: string) => {
     try {
-        if (!settings.vaultPath) {
-            throw new Error('No vault selected. Please go to settings.');
-        }
-        const inboxFile = join(settings.vaultPath, 'Inbox/Inbox.md');
-        const contentToAppend = `\n${text}`;
-
-        // Ensure directory exists (optional, but safer)
-        const dir = join(settings.vaultPath, 'Inbox');
-        await fs.mkdir(dir, { recursive: true });
-
-        await fs.appendFile(inboxFile, contentToAppend, 'utf8');
+        const out = getOutputById('inbox');
+        await appendToOutput(out, text);
         return { success: true };
     } catch (error) {
         console.error('Failed to append to file:', error);
@@ -147,22 +234,8 @@ ipcMain.handle('append-to-inbox', async (_event, text: string) => {
 
 ipcMain.handle('append-to-daily-note', async (_event, text: string) => {
     try {
-        if (!settings.vaultPath) {
-            throw new Error('No vault selected. Please go to settings.');
-        }
-
-        const now = new Date();
-        const yyyy = now.getFullYear();
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const dd = String(now.getDate()).padStart(2, '0');
-        const calendarDir = join(settings.vaultPath, 'Calendar');
-        const dailyFile = join(calendarDir, `${yyyy}-${mm}-${dd}.md`);
-
-        // Ensure directory exists
-        await fs.mkdir(calendarDir, { recursive: true });
-
-        const contentToAppend = `\n${text}`;
-        await fs.appendFile(dailyFile, contentToAppend, 'utf8');
+        const out = getOutputById('daily-note');
+        await appendToOutput(out, text, new Date());
         return { success: true };
     } catch (error) {
         console.error('Failed to append to daily note:', error);
@@ -303,21 +376,20 @@ async function stopTimerLogic() {
         const line = `- ${startStr} - ${endStr}\n`;
         try {
             if (recordedDestination === 'Inbox') {
+                const out = getOutputById('inbox');
+                // appendToOutput adds its own leading newline; we already have one in line, so write directly
                 if (!settings.vaultPath) throw new Error('No vault selected');
-                const inboxDir = join(settings.vaultPath, 'Inbox');
-                const inboxFile = join(inboxDir, 'Inbox.md');
-                await fs.mkdir(inboxDir, { recursive: true });
-                await fs.appendFile(inboxFile, line, 'utf8');
+                const expandedRel = expandPathPlaceholders(out.path, new Date());
+                const absFile = await resolveVaultFilePath(settings.vaultPath, expandedRel);
+                await fs.mkdir(dirname(absFile), { recursive: true });
+                await fs.appendFile(absFile, line, 'utf8');
             } else if (recordedDestination === 'Daily Note') {
+                const out = getOutputById('daily-note');
                 if (!settings.vaultPath) throw new Error('No vault selected');
-                const now = new Date();
-                const yyyy = now.getFullYear();
-                const mm = String(now.getMonth() + 1).padStart(2, '0');
-                const dd = String(now.getDate()).padStart(2, '0');
-                const calendarDir = join(settings.vaultPath, 'Calendar');
-                const dailyFile = join(calendarDir, `${yyyy}-${mm}-${dd}.md`);
-                await fs.mkdir(calendarDir, { recursive: true });
-                await fs.appendFile(dailyFile, line, 'utf8');
+                const expandedRel = expandPathPlaceholders(out.path, new Date());
+                const absFile = await resolveVaultFilePath(settings.vaultPath, expandedRel);
+                await fs.mkdir(dirname(absFile), { recursive: true });
+                await fs.appendFile(absFile, line, 'utf8');
             }
         } catch (err) {
             console.error('Failed to append timer record:', err);

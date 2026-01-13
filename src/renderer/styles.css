@@ -422,6 +422,64 @@ textarea::placeholder {
 .button:hover {
   opacity: 0.9;
 }
+
+/* Outputs Settings (Options page) */
+.outputs-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.outputs-help {
+  font-size: 12px;
+  color: var(--placeholder);
+  line-height: 1.4;
+}
+
+.outputs-help code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+[data-theme="light"] .outputs-help code {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.outputs-empty {
+  font-size: 12px;
+  color: var(--placeholder);
+}
+
+.outputs-row {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.outputs-remove {
+  width: 36px;
+  height: 36px;
+}
+
+.outputs-remove:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.outputs-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.outputs-actions .button {
+  padding: 10px 12px;
+  font-size: 13px;
+}
 /* Insert Menu Styles */
 .insert-menu {
   background: transparent;

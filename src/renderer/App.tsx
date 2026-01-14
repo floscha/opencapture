@@ -85,6 +85,7 @@ const Options: React.FC = () => {
     const [theme, setTheme] = useState<'dark' | 'light' | 'system'>('system');
     const [maxLines, setMaxLines] = useState<number>(10);
     const [outputs, setOutputs] = useState<Array<{ name: string; path: string; id?: 'inbox' | 'daily-note' }>>([]);
+    const [geminiApiKey, setGeminiApiKey] = useState<string>('');
     const [vaults, setVaults] = useState<{ name: string; path: string }[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -98,6 +99,7 @@ const Options: React.FC = () => {
             setTheme(settings.theme ?? 'system');
             setMaxLines(typeof (settings as any).maxLines === 'number' ? (settings as any).maxLines : 10);
             setOutputs(Array.isArray((settings as any).outputs) ? (settings as any).outputs : []);
+            setGeminiApiKey(typeof (settings as any).geminiApiKey === 'string' ? (settings as any).geminiApiKey : '');
             setVaults(availableVaults);
             setIsLoading(false);
         };
@@ -143,7 +145,7 @@ const Options: React.FC = () => {
                 e.preventDefault();
                 // Save and close
                 (async () => {
-                    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines, outputs } as any ) });
+                    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines, outputs, geminiApiKey } as any ) });
                     window.close();
                 })();
                 return;
@@ -155,14 +157,14 @@ const Options: React.FC = () => {
                 e.preventDefault();
                 // Save settings immediately and close
                 (async () => {
-                    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines, outputs } as any ) });
+                    await window.api.updateSettings({ ...( { vaultPath: vaultPath, theme, maxLines, outputs, geminiApiKey } as any ) });
                     window.close();
                 })();
             }
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-    }, [vaultPath, theme, maxLines, outputs]);
+    }, [vaultPath, theme, maxLines, outputs, geminiApiKey]);
 
 
     const pageRef = useRef<HTMLDivElement | null>(null);
@@ -266,6 +268,21 @@ const Options: React.FC = () => {
             </div>
 
             <div className="settings-group">
+                <label htmlFor="gemini-api-key">Gemini 3 API key</label>
+                <input
+                    id="gemini-api-key"
+                    type="password"
+                    value={geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    placeholder="Paste your Gemini API key"
+                    autoComplete="off"
+                />
+                <div className="outputs-help" style={{ marginTop: 8 }}>
+                    Used by the “Gemini 3” processor (⌘P).
+                </div>
+            </div>
+
+            <div className="settings-group">
                 <label>Outputs</label>
                 <div className="outputs-settings">
                     <div className="outputs-help">
@@ -348,6 +365,7 @@ const Options: React.FC = () => {
 
 const CommandBar: React.FC = () => {
     const [text, setText] = useState('');
+    const [processingText, setProcessingText] = useState('');
     // in-app timer indicator removed per user request
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -358,7 +376,36 @@ const CommandBar: React.FC = () => {
     const [showOutputMenu, setShowOutputMenu] = useState(false);
     const [selectedOutputIndex, setSelectedOutputIndex] = useState(1); // 0 = Inbox, 1 = Daily Note
     const cmdOPressedRef = useRef(false);
+    const [showProcessorMenu, setShowProcessorMenu] = useState(false);
+    const [selectedProcessorIndex, setSelectedProcessorIndex] = useState(0);
+    const cmdPPressedRef = useRef(false);
+    const [isProcessing, setIsProcessing] = useState(false);
     const [maxLines, setMaxLines] = useState<number>(10);
+
+    // Animated "placeholder" while processing (textarea is disabled, so placeholder won't render)
+    useEffect(() => {
+        if (!isProcessing) {
+            setProcessingText('');
+            return;
+        }
+
+        const frames = [
+            'Processing',
+            'Processing.',
+            'Processing..',
+            'Processing...',
+        ];
+        let i = 0;
+        setProcessingText(frames[i]);
+        const id = window.setInterval(() => {
+            i = (i + 1) % frames.length;
+            setProcessingText(frames[i]);
+        }, 250);
+
+        return () => {
+            window.clearInterval(id);
+        };
+    }, [isProcessing]);
 
     // Auto-resize textarea and window
     useEffect(() => {
@@ -389,7 +436,7 @@ const CommandBar: React.FC = () => {
                 }
             });
         }
-    }, [text, showInsertMenu, showOutputMenu, maxLines]);
+    }, [text, showInsertMenu, showOutputMenu, showProcessorMenu, selectedProcessorIndex, isProcessing, maxLines]);
 
     // Close insert menu when clicking outside
     useEffect(() => {
@@ -425,6 +472,23 @@ const CommandBar: React.FC = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [showOutputMenu, destination]);
 
+    // Close processor menu when clicking outside
+    useEffect(() => {
+        if (!showProcessorMenu) return;
+
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest('.processor-menu')) {
+                setShowProcessorMenu(false);
+                setSelectedProcessorIndex(0);
+                cmdPPressedRef.current = false;
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showProcessorMenu]);
+
     // Load maxLines from settings (and keep in sync)
     useEffect(() => {
         const setup = async () => {
@@ -452,6 +516,7 @@ const CommandBar: React.FC = () => {
     useEffect(() => {
         const insertMenuItems = ['clipboard', 'browserTab'] as const;
         const outputMenuItems = ['Inbox', 'Daily Note'] as const;
+        const processorMenuItems = ['Gemini 3'] as const;
         
         const handler = async (e: KeyboardEvent) => {
             // Cmd+Shift+T => pause (or resume if already paused)
@@ -520,6 +585,28 @@ const CommandBar: React.FC = () => {
                     setSelectedOutputIndex((prev) => (prev + 1) % outputMenuItems.length);
                 }
             }
+            // Cmd+P: show processors menu and cycle through processors while cmd is held
+            if ((e.key === 'p' || e.key === 'P') && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (isProcessing) return;
+
+                if (!showProcessorMenu) {
+                    // First press: show menu
+                    // ensure other menus are closed
+                    setShowInsertMenu(false);
+                    setSelectedInsertIndex(0);
+                    setShowOutputMenu(false);
+                    setSelectedOutputIndex(destination === 'Inbox' ? 0 : 1);
+                    setShowProcessorMenu(true);
+                    setSelectedProcessorIndex(0);
+                    cmdPPressedRef.current = true;
+                } else if (cmdPPressedRef.current) {
+                    // cycle to next
+                    setSelectedProcessorIndex((prev) => (prev + 1) % processorMenuItems.length);
+                }
+            }
             // Cmd+I: show insert menu and cycle through items while cmd is held
             if ((e.key === 'i' || e.key === 'I') && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
@@ -566,6 +653,20 @@ const CommandBar: React.FC = () => {
                     // Return focus to the textarea
                     requestAnimationFrame(() => textareaRef.current?.focus());
                 }
+
+                if (cmdPPressedRef.current && showProcessorMenu) {
+                    cmdPPressedRef.current = false;
+
+                    const selectedProcessor = processorMenuItems[selectedProcessorIndex];
+                    setShowProcessorMenu(false);
+                    setSelectedProcessorIndex(0);
+
+                    if (selectedProcessor === 'Gemini 3') {
+                        await handleRunProcessor('gemini-3');
+                    }
+
+                    requestAnimationFrame(() => textareaRef.current?.focus());
+                }
             }
         };
         
@@ -575,7 +676,7 @@ const CommandBar: React.FC = () => {
             window.removeEventListener('keydown', handler);
             window.removeEventListener('keyup', keyupHandler);
         };
-    }, [text, showInsertMenu, selectedInsertIndex, showOutputMenu, selectedOutputIndex, destination]);
+    }, [text, showInsertMenu, selectedInsertIndex, showOutputMenu, selectedOutputIndex, showProcessorMenu, selectedProcessorIndex, destination, isProcessing]);
 
     const handleKeyDown = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Handle Tab / Shift+Tab for indentation and inserting a literal tab
@@ -692,6 +793,13 @@ const CommandBar: React.FC = () => {
                 setShowOutputMenu(false);
                 setSelectedOutputIndex(destination === 'Inbox' ? 0 : 1);
                 cmdOPressedRef.current = false;
+                return;
+            }
+            if (showProcessorMenu) {
+                e.preventDefault();
+                setShowProcessorMenu(false);
+                setSelectedProcessorIndex(0);
+                cmdPPressedRef.current = false;
                 return;
             }
             window.api.hideWindow();
@@ -817,6 +925,34 @@ const CommandBar: React.FC = () => {
         }
     };
 
+    const handleRunProcessor = async (processorId: 'gemini-3') => {
+        try {
+            if (!text.trim()) return;
+            setIsProcessing(true);
+
+            const res = await (window.api as any).runProcessor(processorId, text);
+            if (res && res.success) {
+                setText(typeof res.output === 'string' ? res.output : '');
+                // Put cursor at end of output
+                requestAnimationFrame(() => {
+                    const ta = textareaRef.current;
+                    if (!ta) return;
+                    const pos = ta.value.length;
+                    ta.focus();
+                    ta.setSelectionRange(pos, pos);
+                    const ev = new Event('input', { bubbles: true });
+                    ta.dispatchEvent(ev);
+                });
+            } else {
+                console.error('Processor failed:', res?.error);
+            }
+        } catch (err) {
+            console.error('Failed to run processor', err);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     const handleSubmit = async () => {
         if (!text.trim()) return;
 
@@ -927,11 +1063,13 @@ const CommandBar: React.FC = () => {
         <div className="command-bar" ref={containerRef}>
             <textarea
                 ref={textareaRef}
-                value={text}
+                className={isProcessing ? 'is-processing' : undefined}
+                value={isProcessing ? processingText : text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Type to capture..."
                 autoFocus
+                disabled={isProcessing}
                 rows={1}
             />
             {showInsertMenu && (
@@ -965,6 +1103,17 @@ const CommandBar: React.FC = () => {
                         onClick={() => handleOutputSelect('Daily Note')}
                     >
                         Daily Note
+                    </div>
+                </div>
+            )}
+            {showProcessorMenu && (
+                <div className="processor-menu">
+                    <div className="menu-header">Select a processor</div>
+                    <div
+                        className={`menu-item ${selectedProcessorIndex === 0 ? 'selected' : ''}`}
+                        onClick={() => handleRunProcessor('gemini-3')}
+                    >
+                        Gemini 3
                     </div>
                 </div>
             )}

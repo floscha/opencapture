@@ -29,4 +29,6 @@ contextBridge.exposeInMainWorld('api', {
     unlockAutoHide: () => ipcRenderer.send('unlock-auto-hide'),
     // Get active browser tab (title and URL) on macOS (Google Chrome)
     getActiveBrowserTab: () => ipcRenderer.invoke('get-active-browser-tab'),
+    // Run a processor (e.g. Gemini 3) in the main process
+    runProcessor: (processorId: string, input: string) => ipcRenderer.invoke('run-processor', processorId, input),
 });

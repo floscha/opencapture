@@ -89,6 +89,19 @@ textarea::placeholder {
   color: var(--placeholder);
 }
 
+/* While a processor runs we show an animated "Processing..." message inside the textarea.
+   Make it look like placeholder text so it doesn't get confused with real content. */
+textarea.is-processing {
+  color: var(--placeholder);
+  caret-color: transparent;
+}
+
+textarea:disabled.is-processing {
+  /* Some browsers apply a default disabled text color; force our placeholder-like color */
+  -webkit-text-fill-color: var(--placeholder);
+  opacity: 1;
+}
+
 .footer {
   display: flex;
   justify-content: space-between;
@@ -513,5 +526,41 @@ textarea::placeholder {
 }
 
 .insert-menu .menu-item.selected {
+  background: var(--hover-bg);
+}
+
+/* Processor Menu Styles (match Insert/Output menus) */
+.processor-menu {
+  background: transparent;
+  border-top: 1px solid var(--border);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.processor-menu .menu-header {
+  padding: 8px 12px 4px 12px;
+  color: var(--placeholder);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+.processor-menu .menu-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text);
+  transition: background 0.15s ease;
+  font-size: 13px;
+}
+
+.processor-menu .menu-item:hover {
+  background: var(--hover-bg);
+}
+
+.processor-menu .menu-item.selected {
   background: var(--hover-bg);
 }

@@ -3,6 +3,7 @@ import { exec } from 'child_process';
 import { join, resolve, relative, sep, dirname } from 'path';
 import { promises as fs } from 'fs';
 import { homedir } from 'os';
+import { GoogleGenAI } from '@google/genai';
 
 // Path constants
 const OBSIDIAN_DOCUMENTS_PATH = join(homedir(), 'Library/Mobile Documents/iCloud~md~obsidian/Documents');
@@ -12,6 +13,8 @@ interface Settings {
     vaultPath: string;
     theme?: 'dark' | 'light' | 'system';
     outputs?: OutputConfig[];
+    /** API key for Google Gemini (Gemini 3 processor) */
+    geminiApiKey?: string;
 }
 
 type BuiltInOutputId = 'inbox' | 'daily-note';
@@ -32,7 +35,10 @@ const getInitialSettings = (): Settings => ({
         { id: 'inbox', name: 'Inbox', path: 'Inbox/Inbox.md' },
         { id: 'daily-note', name: 'Daily Note', path: 'Calendar/yyyy-mm-dd.md' },
     ],
+    geminiApiKey: '',
 });
+
+type ProcessorId = 'gemini-3';
 
 function expandPathPlaceholders(template: string, now = new Date()): string {
     const yyyy = String(now.getFullYear());
@@ -255,6 +261,33 @@ ipcMain.handle('update-settings', async (_event, newSettings: Partial<Settings>)
         console.warn('Failed to broadcast settings-updated', e);
     }
     return settings;
+});
+
+ipcMain.handle('run-processor', async (_event, processorId: ProcessorId, input: string) => {
+    try {
+        const trimmed = String(input ?? '').trim();
+        if (!trimmed) return { success: false, error: 'No input provided' };
+
+        if (processorId === 'gemini-3') {
+            const apiKey = String(settings.geminiApiKey ?? '').trim();
+            if (!apiKey) {
+                return { success: false, error: 'Gemini API key is not set. Please add it in Settings.' };
+            }
+
+            const ai = new GoogleGenAI({ apiKey });
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-pro-preview',
+                contents: trimmed,
+            });
+
+            return { success: true, output: response.text ?? '' };
+        }
+
+        return { success: false, error: `Unknown processor: ${processorId}` };
+    } catch (error) {
+        console.error('Failed to run processor:', error);
+        return { success: false, error: (error as Error).message };
+    }
 });
 
 ipcMain.handle('list-vaults', async () => {

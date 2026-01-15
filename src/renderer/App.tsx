@@ -558,8 +558,18 @@ const CommandBar: React.FC = () => {
                         else if (window.api.toggleTimer) await window.api.toggleTimer(text, destination);
                     } else {
                         // start
-                        if (window.api.startTimer) await window.api.startTimer(text, destination);
-                        else if (window.api.toggleTimer) await window.api.toggleTimer(text, destination);
+                        let _res: any = null;
+                        if (window.api.startTimer) {
+                            try { _res = await window.api.startTimer(text, destination); } catch (e) { _res = null; }
+                        } else if (window.api.toggleTimer) {
+                            try { _res = await window.api.toggleTimer(text, destination); } catch (e) { _res = null; }
+                        }
+                        // If the timer started, clear the input field
+                        try {
+                            if (_res && _res.running) setText('');
+                        } catch (e) {
+                            // ignore - defensive
+                        }
                     }
                 } catch (err) {
                     console.error('Failed to start/stop timer', err);

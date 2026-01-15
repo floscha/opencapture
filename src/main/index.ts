@@ -389,6 +389,8 @@ async function stopTimerLogic() {
     const hadStart = timerStart !== null;
     const recordedDestination = timerDestination;
     const recordedStart = timerStart;
+    // Capture the description that was active when the timer started so we can record it
+    const recordedDescription = timerDescription;
     timerStart = null;
     timerDescription = '';
     timerDestination = null;
@@ -404,9 +406,13 @@ async function stopTimerLogic() {
     if (hadStart && recordedDestination && recordedStart !== null) {
         const start = new Date(recordedStart);
         const end = new Date();
-        const startStr = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')} ${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}:${String(start.getSeconds()).padStart(2, '0')}`;
-        const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')} ${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}:${String(end.getSeconds()).padStart(2, '0')}`;
-        const line = `- ${startStr} - ${endStr}\n`;
+        // Format times as hh:mm (24-hour, zero-padded)
+        const fmtTime = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        const startTime = fmtTime(start);
+        const endTime = fmtTime(end);
+    // Use the recorded description as the title; fall back to a generic label if empty
+    const title = (recordedDescription || '').trim() || 'Timer';
+        const line = `- ${title} (${startTime} - ${endTime})\n`;
         try {
             if (recordedDestination === 'Inbox') {
                 const out = getOutputById('inbox');

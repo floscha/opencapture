@@ -5,6 +5,15 @@ import { promises as fs } from 'fs';
 import { homedir } from 'os';
 import { GoogleGenAI } from '@google/genai';
 
+interface TaskScanResult {
+    open: number;
+    total: number;
+    openTasks: string[];
+    /** Files where tasks were considered (for debugging/tracking) */
+    consideredFiles: string[];
+    updatedAt: number;
+}
+
 // Path constants
 const OBSIDIAN_DOCUMENTS_PATH = join(homedir(), 'Library/Mobile Documents/iCloud~md~obsidian/Documents');
 const SETTINGS_FILE_PATH = join(app.getPath('userData'), 'settings.json');
@@ -131,6 +140,205 @@ let timerDestination: 'Inbox' | 'Daily Note' | null = null;
 let timerPaused = false;
 let timerPausedElapsed = 0; // accumulated elapsed ms while paused
 let autoHideLocked = false;
+
+// Vault task scanning state
+let lastTaskScan: TaskScanResult | null = null;
+let taskScanInterval: NodeJS.Timeout | null = null;
+
+function formatYyyyMmDd(d = new Date()): string {
+    const yyyy = String(d.getFullYear());
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+async function listMarkdownFilesRecursively(rootDir: string): Promise<string[]> {
+    const out: string[] = [];
+    const stack: string[] = [rootDir];
+
+    while (stack.length) {
+        const dir = stack.pop()!;
+        let entries: Array<import('fs').Dirent> = [];
+        try {
+            entries = await fs.readdir(dir, { withFileTypes: true });
+        } catch {
+            continue;
+        }
+
+        for (const entry of entries) {
+            if (entry.name.startsWith('.')) continue;
+            // avoid scanning some common heavy vault folders
+            if (entry.isDirectory()) {
+                if (entry.name === '.obsidian' || entry.name === 'node_modules') continue;
+                stack.push(join(dir, entry.name));
+                continue;
+            }
+            if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+                out.push(join(dir, entry.name));
+            }
+        }
+    }
+
+    return out;
+}
+
+function extractMarkdownTasksFromText(text: string): { total: number; open: number; openTasks: string[] } {
+    // Consider both exact formats requested:
+    // open: "-[ ]" (tolerate optional spaces around) and "- [ ]"
+    // done: "- [x]" (case-insensitive)
+    // We consider tasks anywhere in file, line-based.
+    const lines = String(text ?? '').split(/\r?\n/);
+    let total = 0;
+    let open = 0;
+    const openTasks: string[] = [];
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        // Match markdown task list items. Allow + or * too? Spec says '-' only, so keep strict.
+        const m = line.match(/^\-\s*\[( |x|X)\]\s*(.*)$/);
+        if (!m) continue;
+        total += 1;
+        const checked = m[1].toLowerCase() === 'x';
+        const taskText = (m[2] ?? '').trim();
+        if (!checked) {
+            open += 1;
+            openTasks.push(taskText || '(untitled task)');
+        }
+    }
+
+    return { total, open, openTasks };
+}
+
+function extractMarkdownTasksForBacklinkFromText(text: string, backlink: string): { total: number; open: number; openTasks: string[] } {
+    // Only consider task lines that themselves contain the backlink, e.g.
+    // - [ ] do thing [[2026-01-24]]
+    const lines = String(text ?? '').split(/\r?\n/);
+    let total = 0;
+    let open = 0;
+    const openTasks: string[] = [];
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line.includes(backlink)) continue;
+        const m = line.match(/^\-\s*\[( |x|X)\]\s*(.*)$/);
+        if (!m) continue;
+        total += 1;
+        const checked = m[1].toLowerCase() === 'x';
+        const taskText = (m[2] ?? '').trim();
+        if (!checked) {
+            open += 1;
+            openTasks.push(taskText || '(untitled task)');
+        }
+    }
+
+    return { total, open, openTasks };
+}
+
+async function computeTodayTasksFromVault(vaultPath: string): Promise<TaskScanResult> {
+    const today = formatYyyyMmDd(new Date());
+    const todayLink = `[[${today}]]`;
+    const dailyOutput = getOutputById('daily-note');
+    const dailyRel = expandPathPlaceholders(dailyOutput.path, new Date());
+
+    const considered = new Set<string>();
+    const openTasks: string[] = [];
+    let total = 0;
+    let open = 0;
+
+    // 1) Today's calendar note (if present): include ALL task lines.
+    try {
+        const absDaily = await resolveVaultFilePath(vaultPath, dailyRel);
+        const st = await fs.stat(absDaily);
+        if (st.isFile()) {
+            const content = await fs.readFile(absDaily, 'utf8');
+            const extracted = extractMarkdownTasksFromText(content);
+            total += extracted.total;
+            open += extracted.open;
+            openTasks.push(...extracted.openTasks);
+            considered.add(absDaily);
+        }
+    } catch {
+        // ignore missing/invalid daily note
+    }
+
+    // 2) Backlink tasks for today: ONLY task lines that contain "[[yyyy-mm-dd]]".
+    // Scan all markdown files, but count tasks only on lines with the backlink.
+    let mdFiles: string[] = [];
+    try {
+        mdFiles = await listMarkdownFilesRecursively(vaultPath);
+    } catch {
+        mdFiles = [];
+    }
+
+    for (const absFile of mdFiles) {
+        if (considered.has(absFile)) continue;
+        let content = '';
+        try {
+            content = await fs.readFile(absFile, 'utf8');
+        } catch {
+            continue;
+        }
+
+        if (!content.includes(todayLink)) continue;
+        const extracted = extractMarkdownTasksForBacklinkFromText(content, todayLink);
+        if (extracted.total === 0) continue;
+        total += extracted.total;
+        open += extracted.open;
+        openTasks.push(...extracted.openTasks);
+        considered.add(absFile);
+    }
+
+    return {
+        open,
+        total,
+        openTasks,
+        consideredFiles: Array.from(considered),
+        updatedAt: Date.now(),
+    };
+}
+
+async function refreshVaultTasksAndTray() {
+    if (!tray) return;
+    if (!settings.vaultPath) {
+        lastTaskScan = null;
+        // If no timer is running, keep tray title empty.
+        if (!timerInterval && !timerPaused) {
+            try { tray.setTitle(''); } catch {}
+        }
+        updateTrayMenu();
+        return;
+    }
+
+    try {
+        lastTaskScan = await computeTodayTasksFromVault(settings.vaultPath);
+    } catch (e) {
+        console.error('Failed to compute today tasks from vault', e);
+        lastTaskScan = {
+            open: 0,
+            total: 0,
+            openTasks: [],
+            consideredFiles: [],
+            updatedAt: Date.now(),
+        };
+    }
+
+    // If timer is running, prefer timer title. Otherwise show tasks summary.
+    if (!timerInterval && !timerPaused) {
+        const openCount = lastTaskScan.open;
+        // User request: show ONLY open count; show nothing when 0.
+        const title = openCount > 0 ? ` ${openCount}` : '';
+        try { tray.setTitle(title); } catch {}
+    }
+    updateTrayMenu();
+}
+
+function ensureTaskScanTimer() {
+    if (taskScanInterval) return;
+    // Refresh reasonably often; this is a vault-wide scan.
+    taskScanInterval = setInterval(() => {
+        refreshVaultTasksAndTray().catch(() => {});
+    }, 60_000);
+}
 
 async function loadSettings() {
     try {
@@ -260,6 +468,11 @@ ipcMain.handle('update-settings', async (_event, newSettings: Partial<Settings>)
     } catch (e) {
         console.warn('Failed to broadcast settings-updated', e);
     }
+
+    // Refresh tray tasks when vault changes (or outputs path changes)
+    try {
+        await refreshVaultTasksAndTray();
+    } catch {}
     return settings;
 });
 
@@ -364,7 +577,36 @@ function ensureTray() {
 
 function updateTrayMenu() {
     if (!tray) return;
+
+    const tasksLabel = settings.vaultPath
+        ? `${(lastTaskScan?.open ?? 0)}/${(lastTaskScan?.total ?? 0)} tasks today`
+        : 'No vault selected';
+
+    const SEP: Electron.MenuItemConstructorOptions = { type: 'separator' as const };
+
+    const openTaskItems: Electron.MenuItemConstructorOptions[] = (lastTaskScan?.openTasks ?? []).slice(0, 50).map((t) => ({
+        label: t.length > 120 ? `${t.slice(0, 117)}...` : t,
+        enabled: false,
+    }));
+
     const template: Electron.MenuItemConstructorOptions[] = [
+        {
+            label: tasksLabel,
+            enabled: false,
+        },
+        ...(openTaskItems.length
+            ? [
+                  SEP,
+                  { label: 'Open tasks', enabled: false },
+                  ...openTaskItems,
+              ]
+            : settings.vaultPath
+            ? [
+                  SEP,
+                  { label: 'No open tasks 🎉', enabled: false },
+              ]
+            : []),
+        SEP,
         {
             label: timerInterval ? 'Stop Timer' : 'No timer running',
             enabled: !!timerInterval,
@@ -374,8 +616,26 @@ function updateTrayMenu() {
                 } catch (e) {
                     console.error('Failed to stop timer from tray menu', e);
                 }
-            }
-        }
+            },
+        },
+        {
+            label: 'Refresh tasks',
+            enabled: !!settings.vaultPath,
+            click: async () => {
+                await refreshVaultTasksAndTray();
+            },
+        },
+        {
+            label: 'Settings…',
+            click: () => {
+                createOptionsWindow();
+            },
+        },
+        SEP,
+        {
+            label: 'Quit',
+            click: () => app.quit(),
+        },
     ];
     const menu = Menu.buildFromTemplate(template);
     tray.setContextMenu(menu);
@@ -410,8 +670,8 @@ async function stopTimerLogic() {
         const fmtTime = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
         const startTime = fmtTime(start);
         const endTime = fmtTime(end);
-    // Use the recorded description as the title; fall back to a generic label if empty
-    const title = (recordedDescription || '').trim() || 'Timer';
+        // Use the recorded description as the title; fall back to a generic label if empty
+        const title = (recordedDescription || '').trim() || 'Timer';
         const line = `- ${title} (${startTime} - ${endTime})\n`;
         try {
             if (recordedDestination === 'Inbox') {
@@ -469,12 +729,8 @@ function updateTrayTitle() {
     // When paused, append ' (paused)' in lowercase brackets at the end
     const base = `${timeStr} - ${timerDescription}`;
     const title = timerPaused ? `${base} (paused)` : base;
-    // setTitle works on macOS to show text in status bar
-    try {
-        tray.setTitle(title);
-    } catch (e) {
-        // Some platforms may not support setTitle; ignore
-    }
+    // When timer is running/paused, it owns the tray title.
+    try { tray.setTitle(title); } catch (e) {}
     // Broadcast timer tick to renderer windows
     try {
         const state = { running: true, elapsed, description: timerDescription, paused: !!timerPaused };
@@ -511,6 +767,11 @@ ipcMain.handle('stop-timer', async () => {
     timerPaused = false;
     timerPausedElapsed = 0;
     await stopTimerLogic();
+
+    // Restore task title after stopping timer.
+    try {
+        await refreshVaultTasksAndTray();
+    } catch {}
     return { running: false };
 });
 
@@ -644,6 +905,13 @@ app.whenReady().then(async () => {
     } catch (e) {
         console.error('Failed to create tray on startup', e);
     }
+
+    // Start task scanning (runs only if a vault is set)
+    ensureTaskScanTimer();
+    // Initial fill
+    try {
+        await refreshVaultTasksAndTray();
+    } catch {}
 
     // Register Global Shortcut
     const ret = globalShortcut.register('Control+Space', () => {
